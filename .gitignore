@@ -1,0 +1,41 @@
+# Entorno virtual
+.venv/
+venv/
+env/
+
+# Secretos y variables de entorno
+.streamlit/secrets.toml
+.env
+
+# Base de datos local
+*.db
+*.sqlite
+*.sqlite3
+backups/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Hypothesis (testing)
+.hypothesis/
+
+# Pytest
+.pytest_cache/
+
+# IDEs
+.vscode/
+.idea/
+
+# Cache de Streamlit
+.cache/
+
+# Logs
+*.log
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db

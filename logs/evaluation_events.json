@@ -1,0 +1,22 @@
+[
+  {
+    "timestamp": "2026-02-24T19:54:15.847916",
+    "event_type": "consistency_adjustment",
+    "data": {
+      "score_original": 7,
+      "score_ajustado": 9,
+      "language": "Python",
+      "razon": "Feedback indica 'código perfecto' pero score era bajo"
+    }
+  },
+  {
+    "timestamp": "2026-02-24T19:54:43.536747",
+    "event_type": "consistency_adjustment",
+    "data": {
+      "score_original": 7,
+      "score_ajustado": 9,
+      "language": "Python",
+      "razon": "Feedback indica 'código perfecto' pero score era bajo"
+    }
+  }
+]
