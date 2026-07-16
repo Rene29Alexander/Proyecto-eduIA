@@ -128,7 +128,92 @@ GEMINI_API_KEY = "tu_api_key_aqui"
 
 ---
 
-## 11. Plan de mejora — Semanas 2 a 6
+## 11. API REST — FastAPI (Semana 2)
+
+La plataforma expone **todas** sus capacidades de IA a través de una API RESTful construida con FastAPI.
+
+### Instalación de dependencias
+
+```bash
+pip install fastapi uvicorn
+```
+
+O instala todo el proyecto de una vez:
+
+```bash
+pip install -r requirements.txt
+```
+
+### Configurar la API Key de Gemini
+
+Antes de levantar la API, define la variable de entorno con tu clave:
+
+```bash
+# Windows CMD
+set GEMINI_API_KEY=tu_api_key_aqui
+
+# Windows PowerShell
+$env:GEMINI_API_KEY="tu_api_key_aqui"
+
+# Linux / Mac
+export GEMINI_API_KEY=tu_api_key_aqui
+```
+
+> La API Key también puede estar en `.streamlit/secrets.toml` si ya usas la app Streamlit.
+
+### Levantar el servidor
+
+```bash
+uvicorn api:app --reload --host 0.0.0.0 --port 8000
+```
+
+El flag `--reload` reinicia el servidor automáticamente al detectar cambios.
+
+### Acceder a la documentación interactiva
+
+| Interfaz | URL |
+|---|---|
+| **Swagger UI** (probar endpoints desde el navegador) | http://127.0.0.1:8000/docs |
+| **ReDoc** (documentación de referencia) | http://127.0.0.1:8000/redoc |
+
+### Endpoints disponibles
+
+| Método | Ruta | Tipo | Descripción |
+|---|---|---|---|
+| `GET` | `/health` | Sistema | Estado del servicio y BD |
+| `GET` | `/metadata` | Sistema | Versión, tecnologías y capacidades |
+| `POST` | `/api/evaluate` | IA | Evaluación inteligente de código |
+| `POST` | `/api/courses/generate` | IA | Genera estructura de curso personalizado |
+| `POST` | `/api/chat/ask` | IA | Chat educativo contextualizado por material |
+
+### Ejemplos rápidos
+
+**Evaluar código:**
+```bash
+curl -X POST http://127.0.0.1:8000/api/evaluate \
+  -H "Content-Type: application/json" \
+  -d '{"code": "def suma(a, b):\n    return a + b", "language": "python"}'
+```
+
+**Generar curso:**
+```bash
+curl -X POST http://127.0.0.1:8000/api/courses/generate \
+  -H "Content-Type: application/json" \
+  -d '{"language": "python", "level": "principiante", "sections_count": 5}'
+```
+
+**Chat educativo:**
+```bash
+curl -X POST http://127.0.0.1:8000/api/chat/ask \
+  -H "Content-Type: application/json" \
+  -d '{"context": "Python usa listas [] y tuplas (). Las listas son mutables.", "question": "¿Qué diferencia hay entre lista y tupla?"}'
+```
+
+> Documentación completa con todos los contratos, ejemplos de error y más comandos curl en [`docs/api.md`](docs/api.md)
+
+---
+
+## 12. Plan de mejora — Semanas 2 a 6
 
 | Semana | Objetivo |
 |---|---|
