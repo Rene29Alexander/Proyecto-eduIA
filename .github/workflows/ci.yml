@@ -16,50 +16,54 @@ jobs:
       - name: Checkout del repositorio
         uses: actions/checkout@v4
 
-      # 2. Configurar Python
+      # 2. Configurar Python 3.11
       - name: Configurar Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
 
-      # 3. Instalar dependencias
-      - name: Instalar dependencias
+      # 3. Instalar solo dependencias necesarias para pruebas (rápido y sin fallos)
+      - name: Instalar dependencias de prueba
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-test.txt
 
       # 4. Verificar sintaxis de api.py
       - name: Verificar sintaxis de api.py
-        run: python -c "import ast; ast.parse(open('api.py').read()); print('OK — api.py sin errores de sintaxis')"
+        run: |
+          python -c "import ast; ast.parse(open('api.py').read()); print('OK — api.py sin errores de sintaxis')"
 
-      # 5. Ejecutar pruebas unitarias de la API (sin servidor, sin API Key real)
+      # 5. Pruebas unitarias de la API (sin servidor, sin API Key real)
       - name: Pruebas unitarias de la API
         env:
-          GEMINI_API_KEY: "test-key-placeholder"
+          GEMINI_API_KEY: "test-key-ci"
           TESTING: "true"
         run: |
           python -m pytest tests/test_api_unit.py -v --tb=short
 
-      # 6. Ejecutar pruebas del analizador de sintaxis
+      # 6. Pruebas del analizador de sintaxis
       - name: Pruebas del analizador de sintaxis
         env:
           TESTING: "true"
         run: |
           python -m pytest tests/test_analizador_sintaxis.py -v --tb=short
 
-      # 7. Ejecutar pruebas del analizador de lógica
+      # 7. Pruebas del analizador de lógica
       - name: Pruebas del analizador de lógica
         env:
           TESTING: "true"
         run: |
           python -m pytest tests/test_analizador_logica.py -v --tb=short
 
-      # 8. Resumen de todas las pruebas
-      - name: Resumen de pruebas
+      # 8. Resumen final
+      - name: Resumen de todas las pruebas
         env:
-          GEMINI_API_KEY: "test-key-placeholder"
+          GEMINI_API_KEY: "test-key-ci"
           TESTING: "true"
         run: |
-          python -m pytest tests/test_api_unit.py tests/test_analizador_sintaxis.py tests/test_analizador_logica.py \
+          python -m pytest \
+            tests/test_api_unit.py \
+            tests/test_analizador_sintaxis.py \
+            tests/test_analizador_logica.py \
             --tb=short -q

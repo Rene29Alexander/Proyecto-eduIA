@@ -1,0 +1,18 @@
+# Dependencias mínimas para ejecutar las pruebas en CI/CD
+# Las pruebas unitarias NO requieren Streamlit, scikit-learn ni conexión a Gemini
+
+# API y validación
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+httpx>=0.27.0          # TestClient de FastAPI lo necesita
+
+# Pruebas
+pytest>=7.0.0
+pytest-anyio>=0.0.0
+
+# Utilidades usadas por el código de evaluación
+bcrypt>=4.0.0
+google-generativeai>=0.3.0
+
+# Config del proyecto
+python-dotenv>=1.0.0
