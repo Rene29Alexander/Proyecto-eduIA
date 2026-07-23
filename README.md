@@ -128,7 +128,59 @@ GEMINI_API_KEY = "tu_api_key_aqui"
 
 ---
 
-## 11. API REST — FastAPI (Semana 2)
+## 11. Pruebas automatizadas (Semana 3)
+
+### Instalar dependencias de prueba
+
+```bash
+pip install -r requirements.txt
+```
+
+### Ejecutar todas las pruebas
+
+```bash
+# Todas las pruebas (sin servidor, sin API Key real)
+python -m pytest tests/test_api_unit.py tests/test_analizador_sintaxis.py tests/test_analizador_logica.py -v
+
+# Solo pruebas de la API
+python -m pytest tests/test_api_unit.py -v
+
+# Solo pruebas del evaluador de código
+python -m pytest tests/test_analizador_sintaxis.py tests/test_analizador_logica.py -v
+
+# Resumen compacto
+python -m pytest tests/test_api_unit.py tests/test_analizador_sintaxis.py tests/test_analizador_logica.py -q
+```
+
+### Pruebas de integración (requiere servidor corriendo)
+
+```bash
+# 1. Levantar la API en otra terminal
+uvicorn api:app --reload
+
+# 2. Ejecutar script de evidencia
+python tests/test_api_evidencia.py
+```
+
+### Descripción de los archivos de prueba
+
+| Archivo | Tipo | Qué prueba | Requiere servidor |
+|---|---|---|---|
+| `test_api_unit.py` | Unitaria | Validaciones y endpoints de la API (29 tests) | ❌ No |
+| `test_analizador_sintaxis.py` | Unitaria | Detección de errores de sintaxis por lenguaje | ❌ No |
+| `test_analizador_logica.py` | Unitaria | Detección de errores de lógica | ❌ No |
+| `test_api_evidencia.py` | Integración | Pruebas end-to-end con HTTP real | ✅ Sí |
+| `test_evaluation_properties.py` | Propiedad | Property-based testing del evaluador | ❌ No |
+
+### Pipeline CI/CD
+
+El proyecto incluye `.github/workflows/ci.yml` que ejecuta automáticamente las pruebas en cada push a `main`.
+
+Ver errores detectados y correcciones en [`docs/registro-errores.md`](docs/registro-errores.md)
+
+---
+
+## 12. API REST — FastAPI (Semana 2)
 
 La plataforma expone **todas** sus capacidades de IA a través de una API RESTful construida con FastAPI.
 
