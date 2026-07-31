@@ -265,7 +265,57 @@ curl -X POST http://127.0.0.1:8000/api/chat/ask \
 
 ---
 
-## 12. Plan de mejora — Semanas 2 a 6
+## 12. Despliegue con Docker (Semana 4)
+
+### Requisitos
+- Docker Desktop instalado ([docker.com](https://www.docker.com/products/docker-desktop/))
+- API Key de Google Gemini
+
+### Construir la imagen
+
+```bash
+docker build -t eduia-api:1.0 .
+```
+
+### Ejecutar el contenedor
+
+```bash
+# Windows CMD
+docker run -d -p 8000:8000 -e GEMINI_API_KEY=tu_api_key_aqui --name eduia-api eduia-api:1.0
+
+# Windows PowerShell
+docker run -d -p 8000:8000 -e GEMINI_API_KEY="tu_api_key_aqui" --name eduia-api eduia-api:1.0
+
+# Linux / Mac
+docker run -d -p 8000:8000 -e GEMINI_API_KEY=tu_api_key_aqui --name eduia-api eduia-api:1.0
+```
+
+### Verificar que está corriendo
+
+```bash
+# Ver estado del contenedor
+docker ps
+
+# Ver logs
+docker logs eduia-api
+
+# Probar endpoint /health
+curl http://localhost:8000/health
+
+# Detener el contenedor
+docker stop eduia-api
+```
+
+### Acceder a la documentación interactiva
+
+| Interfaz | URL |
+|---|---|
+| Swagger UI | http://localhost:8000/docs |
+| ReDoc | http://localhost:8000/redoc |
+
+---
+
+## 13. Plan de mejora — Semanas 2 a 6
 
 | Semana | Objetivo |
 |---|---|
