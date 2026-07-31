@@ -58,24 +58,27 @@ REST (FastAPI) se conteneriza por ser el componente más portátil y sin estado.
 - ~100 usuarios máximo simultáneos
 - ~500 llamadas a Gemini por día
 
-| Servicio | Plan | Costo estimado/mes | Notas |
+| Servicio | Plan | Costo/mes | Notas |
 |---|---|---|---|
-| Google Gemini API | Free tier | $0 | Hasta 1,500 req/día gratis |
-| Docker Desktop | Personal | $0 | Gratis para uso personal/educativo |
-| Railway (PaaS alternativo) | Hobby | $5 USD | 512 MB RAM, suficiente para la API |
-| Render (PaaS alternativo) | Free | $0 | Con limitación de sleep en inactividad |
-| VPS mínimo (DigitalOcean) | $4/mes | $4 USD | 512 MB RAM, 10 GB SSD |
-| **Total mínimo** | | **$0 USD** | Solo con free tiers |
-| **Total recomendado** | | **~$5–9 USD/mes** | Con Railway o VPS básico |
+| Google Gemini API | Free tier (1,500 req/día) | $0 | Google AI Studio, sin tarjeta de crédito |
+| Docker Desktop | Personal | $0 | Gratis para uso personal y educativo |
+| Render (PaaS despliegue) | Free tier | $0 | Despliega contenedores gratis, se duerme tras 15 min de inactividad |
+| GitHub Actions (CI/CD) | Free tier (2,000 min/mes) | $0 | Ya integrado en el proyecto |
+| GitHub (repositorio) | Free | $0 | Repositorio público gratuito |
+| SQLite (base de datos) | Incluido en Python | $0 | No requiere servidor externo |
+| **Total actual (académico)** | **Solo free tiers** | **$0 USD** | Stack completamente gratuito |
+| **Total para producción real** | **Alternativas gratuitas** | **$0 USD** | Suficiente para prototipo académico |
 
-### Conclusión de costos
-Para el contexto académico actual, el costo es **$0** usando:
-- Docker local en equipo del grupo
-- Google Gemini Free tier
-- GitHub para repositorio
+### Supuestos del plan gratuito
+- Uso académico con menos de 100 usuarios simultáneos
+- Menos de 1,500 llamadas diarias a Gemini (límite del free tier)
+- El "sleep" de Render en inactividad es aceptable para un prototipo
+- El repositorio es público en GitHub
 
-Para un despliegue real en producción se recomienda Railway ($5/mes) o un VPS
-básico ($4–6/mes).
+### Alternativas gratuitas si se necesita más disponibilidad
+- **Hugging Face Spaces** — despliega apps Python/Docker gratis sin sleep
+- **Koyeb** — free tier con 1 servicio siempre activo, sin tarjeta de crédito
+- **Fly.io** — free tier con 3 VMs pequeñas incluidas
 
 ---
 
