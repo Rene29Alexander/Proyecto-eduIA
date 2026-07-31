@@ -1,0 +1,69 @@
+# ============================================================
+# .dockerignore — EduIA
+# Archivos excluidos de la imagen Docker
+# ============================================================
+
+# Control de versiones
+.git/
+.gitignore
+
+# Entornos virtuales Python
+.venv/
+venv/
+env/
+
+# Archivos de credenciales y secretos — NUNCA incluir en imagen
+.streamlit/secrets.toml
+.env
+*.env
+
+# Base de datos local (se monta como volumen en producción)
+*.db
+*.db-shm
+*.db-wal
+backups/
+
+# Cache y bytecode Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+# Cache de IA
+ai_cache.pkl
+.cache/
+
+# Logs locales
+logs/
+
+# Archivos de prueba (no necesarios en imagen de producción)
+tests/
+pytest_cache/
+.pytest_cache/
+
+# Documentación (no necesaria en imagen)
+docs/
+
+# Scripts de utilidad
+scripts/
+
+# Archivos del editor y sistema operativo
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+.DS_Store
+
+# Archivos de CI/CD (no necesarios en imagen)
+.github/
+
+# Streamlit config (la app Streamlit no corre en el contenedor de la API)
+.streamlit/
+
+# Componentes custom
+.streamlit_gym_component/
+
+# README (documentación, no código)
+README.md
