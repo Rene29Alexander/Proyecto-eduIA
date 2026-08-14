@@ -74,6 +74,12 @@ def check_admin_schema(conn):
             ('logo_url', '', 'URL del logo del sitio'),
             ('footer_text', '© 2026 Plataforma Educativa IA', 'Texto del footer'),
             ('gym_block_paste', '1', 'Bloquear pegar código en el Gimnasio de Código'),
+            # Pool de API keys de Gemini (Semana 5 — rotación automática)
+            ('gemini_api_key',   '', 'API Key de Gemini AI (principal)'),
+            ('gemini_api_key_2', '', 'API Key de Gemini AI (alternativa 2)'),
+            ('gemini_api_key_3', '', 'API Key de Gemini AI (alternativa 3)'),
+            ('gemini_api_key_4', '', 'API Key de Gemini AI (alternativa 4)'),
+            ('gemini_api_key_5', '', 'API Key de Gemini AI (alternativa 5)'),
         ]
         
         for key, value, description in default_settings:
