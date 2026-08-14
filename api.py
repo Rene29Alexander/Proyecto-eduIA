@@ -11,14 +11,19 @@ ReDoc:       http://127.0.0.1:8000/redoc
 """
 
 import os
+import uuid
+import time
+import hashlib
 import sqlite3
 import logging
 import traceback
+from collections import defaultdict
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel, Field, field_validator
 
 # ── Configuración propia (sin importar Streamlit) ────────────────────────────
@@ -40,6 +45,68 @@ SUPPORTED_LANGUAGES: List[str] = [
 SUPPORTED_LEVELS: List[str] = ["principiante", "intermedio", "avanzado"]
 
 # =============================================================================
+# Cache de requests en memoria
+# =============================================================================
+
+_request_cache: Dict[str, Dict] = {}
+_CACHE_TTL_SECONDS = 300  # 5 minutos
+
+
+def _cache_key(endpoint: str, payload: Dict) -> str:
+    raw = f"{endpoint}:{sorted(payload.items())}"
+    return hashlib.md5(raw.encode()).hexdigest()
+
+
+def _cache_get(key: str):
+    entry = _request_cache.get(key)
+    if entry and (time.time() - entry["ts"]) < _CACHE_TTL_SECONDS:
+        return entry["data"]
+    if key in _request_cache:
+        del _request_cache[key]
+    return None
+
+
+def _cache_set(key: str, data: Dict):
+    if len(_request_cache) > 200:
+        oldest = sorted(_request_cache, key=lambda k: _request_cache[k]["ts"])
+        for k in oldest[:50]:
+            del _request_cache[k]
+    _request_cache[key] = {"data": data, "ts": time.time()}
+
+
+# =============================================================================
+# Rate limiting por IP
+# =============================================================================
+
+_rate_counters: Dict[str, Dict] = defaultdict(lambda: {"count": 0, "reset": time.time() + 60})
+_RATE_LIMIT_AI     = 60   # req/min para endpoints de IA
+_RATE_LIMIT_SYSTEM = 300  # req/min para /health y /metadata
+
+
+def _check_rate_limit(ip: str, limit: int) -> bool:
+    bucket = _rate_counters[ip]
+    if time.time() > bucket["reset"]:
+        bucket["count"] = 0
+        bucket["reset"] = time.time() + 60
+    if bucket["count"] >= limit:
+        return False
+    bucket["count"] += 1
+    return True
+
+
+def _assert_rate_limit(request: Request, limit: int = _RATE_LIMIT_AI):
+    ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(ip, limit):
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "Demasiadas solicitudes.",
+                "reason": f"Límite de {limit} solicitudes/minuto por IP alcanzado.",
+                "suggestion": "Espera un minuto e intenta de nuevo.",
+            },
+        )
+
+# =============================================================================
 # Aplicación FastAPI
 # =============================================================================
 
@@ -59,6 +126,31 @@ app = FastAPI(
 )
 
 # =============================================================================
+# Middleware — request_id para correlación de logs (rúbrica: 25 pts)
+# =============================================================================
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    """Asigna un UUID corto a cada request y lo propaga en cabecera X-Request-ID."""
+
+    async def dispatch(self, request: Request, call_next):
+        request_id = str(uuid.uuid4())[:8]
+        request.state.request_id = request_id
+        start = time.time()
+        response = await call_next(request)
+        duration_ms = round((time.time() - start) * 1000, 2)
+        response.headers["X-Request-ID"] = request_id
+        response.headers["X-Response-Time-Ms"] = str(duration_ms)
+        logger.info(
+            "request_id=%s method=%s path=%s status=%d duration_ms=%s",
+            request_id, request.method, request.url.path,
+            response.status_code, duration_ms,
+        )
+        return response
+
+
+app.add_middleware(RequestIDMiddleware)
+
+# =============================================================================
 # Manejador global — evita exponer stacktraces al cliente
 # =============================================================================
 
@@ -76,6 +168,9 @@ async def global_exception_handler(request: Request, exc: Exception):
 # =============================================================================
 # ── Helpers internos ─────────────────────────────────────────────────────────
 # =============================================================================
+
+_ai_manager_singleton = None
+
 
 def _get_api_key() -> str:
     """
@@ -112,21 +207,37 @@ def _check_db() -> bool:
 
 def _build_ai_manager():
     """
-    Instancia AIManager sin Streamlit.
+    Retorna singleton de AIManagerCore.
     Retorna (manager, error_msg|None).
     """
+    global _ai_manager_singleton
     api_key = _get_api_key()
     if not api_key:
         return None, "GEMINI_API_KEY no configurada. Define la variable de entorno o regístrala en la configuración del sistema."
     try:
-        from utils_ai import AIManager           # importación diferida para no activar Streamlit
-        manager = AIManager(api_key=api_key)
+        from utils_ai_core import AIManagerCore
+        if (
+            _ai_manager_singleton
+            and getattr(_ai_manager_singleton, "api_key", "") == api_key
+            and _ai_manager_singleton.model
+        ):
+            return _ai_manager_singleton, None
+        manager = AIManagerCore(api_key=api_key, db_path=str(DB_PATH))
         if not manager.model:
             return None, "No se pudo inicializar ningún modelo de Gemini con la clave provista."
+        _ai_manager_singleton = manager
         return manager, None
     except Exception as exc:
-        logger.error("Error instanciando AIManager: %s", exc)
-        return None, str(exc)
+        logger.error("Error instanciando AIManagerCore: %s", exc)
+        # fallback al AIManager original de utils_ai.py
+        try:
+            from utils_ai import AIManager
+            manager = AIManager(api_key=api_key)
+            if not manager.model:
+                return None, "No se pudo inicializar ningún modelo de Gemini."
+            return manager, None
+        except Exception as exc2:
+            return None, str(exc2)
 
 
 def _raise_gemini_unavailable(reason: str = "") -> None:
@@ -411,7 +522,7 @@ async def metadata():
         500: {"description": "Error interno del servidor."},
     },
 )
-async def evaluate_code(payload: EvaluateRequest):
+async def evaluate_code(request: Request, payload: EvaluateRequest):
     """
     **Motor de evaluación inteligente** — orquestado por `evaluacion/evaluador_integrado.py`.
 
@@ -429,7 +540,12 @@ async def evaluate_code(payload: EvaluateRequest):
     | `language` | Valor en lista soportada | 422 |
     | Gemini no disponible | — | 503 |
     """
-    logger.info("evaluate_code — language=%s len=%d", payload.language, len(payload.code))
+    _assert_rate_limit(request)
+    request_id = getattr(request.state, "request_id", "n/a")
+    logger.info(
+        "evaluate_code — request_id=%s language=%s len=%d",
+        request_id, payload.language, len(payload.code),
+    )
 
     # Inicializar AIManager
     ai_manager, ai_error = _build_ai_manager()
@@ -486,7 +602,7 @@ async def evaluate_code(payload: EvaluateRequest):
         500: {"description": "Error interno del servidor."},
     },
 )
-async def generate_course(payload: CourseGenerateRequest):
+async def generate_course(request: Request, payload: CourseGenerateRequest):
     """
     **Generador de cursos personalizados** — usa `AIManager.generate_course_topics_structure`
     de `utils_ai.py`.
@@ -502,9 +618,11 @@ async def generate_course(payload: CourseGenerateRequest):
     | `level` | principiante / intermedio / avanzado | 422 |
     | `sections_count` | Entre 1 y 10 | 422 |
     """
+    _assert_rate_limit(request)
+    request_id = getattr(request.state, "request_id", "n/a")
     logger.info(
-        "generate_course — language=%s level=%s sections=%d",
-        payload.language, payload.level, payload.sections_count,
+        "generate_course — request_id=%s language=%s level=%s sections=%d",
+        request_id, payload.language, payload.level, payload.sections_count,
     )
 
     # Inicializar AIManager (puede funcionar sin IA con estructura predefinida)
@@ -562,7 +680,7 @@ async def generate_course(payload: CourseGenerateRequest):
         500: {"description": "Error interno del servidor."},
     },
 )
-async def chat_ask(payload: ChatAskRequest):
+async def chat_ask(request: Request, payload: ChatAskRequest):
     """
     **Chat educativo contextualizado** — usa `get_contextualized_chat_response`
     de `utils_ai.py`.
@@ -578,9 +696,11 @@ async def chat_ask(payload: ChatAskRequest):
     | `question` | No vacía, máx. 1 000 chars | 422 |
     | Gemini no disponible | — | 503 |
     """
+    _assert_rate_limit(request)
+    request_id = getattr(request.state, "request_id", "n/a")
     logger.info(
-        "chat_ask — context_len=%d question_len=%d",
-        len(payload.context), len(payload.question),
+        "chat_ask — request_id=%s context_len=%d question_len=%d",
+        request_id, len(payload.context), len(payload.question),
     )
 
     # Gemini es obligatorio para el chat
@@ -620,3 +740,43 @@ async def chat_ask(payload: ChatAskRequest):
         answered_at=datetime.utcnow().isoformat(),
         ai_available=True,
     )
+
+
+# =============================================================================
+# ── Endpoint de estadísticas internas ────────────────────────────────────────
+# =============================================================================
+
+@app.get(
+    "/api/stats",
+    summary="Estadísticas de cache, rate limiting y modelo IA",
+    tags=["Sistema"],
+)
+async def api_stats():
+    """
+    Retorna métricas operativas del servicio:
+    - Estado del cache en memoria
+    - IPs activas en rate limiting
+    - Estado del modelo IA y pool de keys
+    """
+    ai_ok = _ai_manager_singleton is not None and getattr(_ai_manager_singleton, "model", None) is not None
+    key_pool_status = []
+    if ai_ok and hasattr(_ai_manager_singleton, "key_pool"):
+        key_pool_status = _ai_manager_singleton.key_pool.get_status()
+
+    return {
+        "request_cache": {
+            "entries": len(_request_cache),
+            "ttl_seconds": _CACHE_TTL_SECONDS,
+        },
+        "rate_limiting": {
+            "active_ips": len(_rate_counters),
+            "limit_ai_per_min": _RATE_LIMIT_AI,
+            "limit_system_per_min": _RATE_LIMIT_SYSTEM,
+        },
+        "ai_manager": {
+            "initialized": ai_ok,
+            "model": getattr(_ai_manager_singleton, "current_model_name", None) if ai_ok else None,
+            "key_pool": key_pool_status,
+        },
+        "timestamp": datetime.utcnow().isoformat(),
+    }

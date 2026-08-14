@@ -9,6 +9,13 @@ import google.generativeai as genai
 from google.generativeai.types import RequestOptions
 import re
 import json
+
+# Re-exportar get_contextualized_chat_response desde utils_ai_core
+# para que la API (sin Streamlit) pueda importarla sin conflictos
+try:
+    from utils_ai_core import get_contextualized_chat_response  # noqa: F401
+except ImportError:
+    pass  # fallback: se usará la definición local más abajo
 import base64
 import streamlit as st
 import io
