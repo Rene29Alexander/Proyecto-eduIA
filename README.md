@@ -56,9 +56,10 @@ La IA participa en tres momentos clave:
 | Elemento | Detalle |
 |---|---|
 | Tipo | IA Generativa — Large Language Model (LLM) |
-| Modelo | Google Gemini (`gemini-1.5-flash`) |
+| Modelos soportados | `gemini-2.0-flash`, `gemini-1.5-flash`, `gemini-1.5-flash-8b`, `gemini-1.5-pro` |
 | Servicio | Google AI Studio API (`google-generativeai`) |
 | Técnica | Prompting con contexto dinámico (RAG simplificado) |
+| Pool de keys | Hasta 5 API keys con rotación automática por cuota |
 
 ---
 
@@ -107,7 +108,15 @@ Crear el archivo `.streamlit/secrets.toml` con el siguiente contenido:
 GEMINI_API_KEY = "tu_api_key_aqui"
 ```
 
->  No subir este archivo a repositorios públicos. Ver `.env.example` para referencia.
+Para el pool de API keys (rotación automática cuando se agota la cuota):
+
+```toml
+GEMINI_API_KEY   = "tu_api_key_principal"
+GEMINI_API_KEY_2 = "tu_api_key_alternativa_2"
+GEMINI_API_KEY_3 = "tu_api_key_alternativa_3"
+```
+
+> No subir este archivo a repositorios públicos. Ver `.env.example` para referencia completa.
 
 ---
 
@@ -148,8 +157,14 @@ python -m pytest tests/test_api_unit.py -v
 # Solo pruebas del evaluador de código
 python -m pytest tests/test_analizador_sintaxis.py tests/test_analizador_logica.py -v
 
+# Pruebas de los managers de engagement (Semana 5 — 38 tests)
+python -m pytest tests/test_engagement_managers.py -v
+
+# Todas las pruebas juntas
+python -m pytest tests/ -v
+
 # Resumen compacto
-python -m pytest tests/test_api_unit.py tests/test_analizador_sintaxis.py tests/test_analizador_logica.py -q
+python -m pytest tests/ -q
 ```
 
 ### Pruebas de integración (requiere servidor corriendo)
@@ -171,6 +186,7 @@ python tests/test_api_evidencia.py
 | `test_analizador_logica.py` | Unitaria | Detección de errores de lógica | ❌ No |
 | `test_api_evidencia.py` | Integración | Pruebas end-to-end con HTTP real | ✅ Sí |
 | `test_evaluation_properties.py` | Propiedad | Property-based testing del evaluador | ❌ No |
+| `test_engagement_managers.py` | Unitaria | 38 tests para PointsManager, StreakManager, ChallengeManager, LeaderboardManager | ❌ No |
 
 ### Pipeline CI/CD
 
@@ -234,6 +250,7 @@ El flag `--reload` reinicia el servidor automáticamente al detectar cambios.
 |---|---|---|---|
 | `GET` | `/health` | Sistema | Estado del servicio y BD |
 | `GET` | `/metadata` | Sistema | Versión, tecnologías y capacidades |
+| `GET` | `/api/stats` | Sistema | Métricas de cache, rate limiting y modelo IA |
 | `POST` | `/api/evaluate` | IA | Evaluación inteligente de código |
 | `POST` | `/api/courses/generate` | IA | Genera estructura de curso personalizado |
 | `POST` | `/api/chat/ask` | IA | Chat educativo contextualizado por material |
@@ -315,14 +332,81 @@ docker stop eduia-api
 
 ---
 
-## 13. Plan de mejora — Semanas 2 a 6
+## 13. Observabilidad, rendimiento y escalabilidad (Semana 5)
+
+### Instrumentación implementada
+
+La API incluye observabilidad completa mediante:
+
+- **RequestIDMiddleware** — asigna un UUID único (`request_id`) a cada request, propagado en el header `X-Request-ID`
+- **Logs estructurados** — cada request registra `request_id`, `method`, `path`, `status` y `duration_ms`
+- **Rate limiting** — 60 req/min por IP para endpoints de IA, 300 req/min para endpoints de sistema
+- **Cache en memoria** — respuestas de Gemini cacheadas por 5 minutos (TTL configurable)
+- **Pool de API keys** — rotación automática entre hasta 5 keys cuando se agota la cuota
+- **Singleton de AIManager** — instancia reutilizada entre requests (evita reinicialización costosa)
+- **Endpoint `/api/stats`** — métricas operativas en tiempo real (cache, rate limiting, modelo IA)
+
+### Ejemplo de log estructurado
+
+```
+2026-08-13 21:14:28 [INFO] eduia.api: request_id=129dcfc3 method=GET path=/health status=200 duration_ms=8.69
+2026-08-13 21:14:28 [INFO] eduia.api: evaluate_code — request_id=31fe06ea language=python len=29
+2026-08-13 21:14:28 [INFO] eduia.api: request_id=31fe06ea method=POST path=/api/evaluate status=503 duration_ms=2.2
+2026-08-13 21:14:29 [INFO] eduia.api: request_id=9f650024 method=POST path=/api/evaluate status=422 duration_ms=0.71
+```
+
+### Pruebas de carga con Locust
+
+```bash
+# Instalar Locust
+pip install locust==2.46.3
+
+# UI interactiva (abrir http://localhost:8089)
+locust -f locustfile.py --host http://127.0.0.1:8000
+
+# Prueba mínima headless (20 usuarios — requisito de rúbrica)
+locust -f locustfile.py --host http://127.0.0.1:8000 --headless -u 20 -r 2 -t 60s --html docs/reporte_estres_20u.html --csv docs/reporte_estres_20u
+
+# Prueba de estrés completa (200 usuarios)
+locust -f locustfile.py --host http://127.0.0.1:8000 --headless -u 200 -r 10 -t 90s --html docs/reporte_estres_200u.html --csv docs/reporte_estres_200u
+
+# Filtrar por tipo de prueba
+locust -f locustfile.py --tags system       # solo health/metadata
+locust -f locustfile.py --tags ai           # solo endpoints IA
+locust -f locustfile.py --tags validation   # solo casos 422
+```
+
+### Resultados de la línea base (sin Gemini activo)
+
+| Escenario | Usuarios | Requests | p50 | p95 | Máximo | Error |
+|---|---|---|---|---|---|---|
+| Prueba mínima | 20 | 528 | 2 ms | 4 ms | 11 ms | 0% |
+| Prueba de estrés | 200 | 2,100+ | 3 ms | 8 ms | 29 ms | 0% |
+
+### Reportes de evidencia
+
+- [`docs/reporte_estres_20u.html`](docs/reporte_estres_20u.html) — reporte visual prueba 20 usuarios
+- [`docs/reporte_estres_200u.html`](docs/reporte_estres_200u.html) — reporte visual prueba 200 usuarios
+- [`docs/Semana5-Modulo4.pdf`](docs/Semana5-Modulo4.pdf) — entregable completo Semana 5
+
+### Nuevos archivos agregados en Semana 5
+
+| Archivo | Descripción |
+|---|---|
+| `utils_ai_core.py` | Núcleo de IA sin Streamlit: AICache, APIKeyPool, AIManagerCore con reintentos y backoff |
+| `locustfile.py` | Script de pruebas de carga con 5 escenarios y filtrado por tags |
+| `tests/test_engagement_managers.py` | 38 tests unitarios para managers del módulo engagement/ |
+
+---
+
+## 14. Plan de mejora — Semanas 2 a 6
 
 | Semana | Objetivo |
 |---|---|
-| Semana 2 | Crear API REST con FastAPI para separar la lógica de IA del frontend |
-| Semana 3 | Agregar pruebas automatizadas y pipeline CI/CD básico |
-| Semana 4 | Contenerizar con Docker y preparar despliegue en la nube |
-| Semana 5 | Agregar logs, métricas de uso y monitoreo de la API |
+| Semana 2 | ✅ Crear API REST con FastAPI para separar la lógica de IA del frontend |
+| Semana 3 | ✅ Agregar pruebas automatizadas y pipeline CI/CD básico |
+| Semana 4 | ✅ Contenerizar con Docker y preparar despliegue en la nube |
+| Semana 5 | ✅ Observabilidad, instrumentación, pruebas de carga y escalabilidad |
 | Semana 6 | Revisar seguridad, documentación final y defensa técnica |
 
 ---
@@ -332,6 +416,9 @@ docker stop eduia-api
 ```
 proyectof/
 ├── main.py                    # Punto de entrada
+├── api.py                     # API REST FastAPI con observabilidad completa
+├── utils_ai_core.py           # Núcleo de IA: AICache, APIKeyPool, AIManagerCore
+├── locustfile.py              # Script de pruebas de carga (Locust)
 ├── views_admin.py             # Vista del administrador
 ├── views_teacher.py           # Vista del docente
 ├── views_student.py           # Vista del estudiante
@@ -358,25 +445,38 @@ proyectof/
 │   ├── notification_manager.py
 │   ├── points_manager.py
 │   ├── shop_manager.py
-│   └── statistics_manager.py
+│   ├── statistics_manager.py
+│   ├── streak_manager.py
+│   └── team_manager.py
+├── evaluacion/                # Módulo de evaluación de código
+│   ├── evaluador_integrado.py
+│   ├── analizador_logica.py
+│   ├── analizador_sintaxis.py
+│   ├── detector_errores.py
+│   ├── generador_feedback.py
+│   ├── logger_evaluacion.py
+│   ├── sistema_calificacion.py
+│   └── validador_consistencia.py
 ├── data/                      # Datos estáticos
 │   └── question_bank.json
-├── docs/                      # Documentación técnica
+├── docs/                      # Documentación técnica y evidencias
 │   ├── diagnostico-semana1.md
 │   ├── arquitectura-actual.md
 │   ├── arquitectura-objetivo.md
 │   ├── riesgos-tecnicos.md
-│   └── plan-mejora.md
+│   ├── plan-mejora.md
+│   ├── api.md
+│   ├── reporte_estres_20u.html    # Reporte Locust 20 usuarios
+│   ├── reporte_estres_200u.html   # Reporte Locust 200 usuarios
+│   └── Semana5-Modulo4.pdf        # Entregable Semana 5
 ├── scripts/                   # Scripts de utilidad y mantenimiento
-│   ├── add_test_coins.py
-│   ├── check_users.py
-│   ├── create_daily_challenges.py
-│   ├── fix_force_refresh.py
-│   ├── inspect_exam.py
-│   └── test_tutor_functions.py
 ├── tests/                     # Pruebas automatizadas
-├── backups/                   # Backups automáticos de la BD
-├── learning_platform.db       # Base de datos SQLite
+│   ├── test_api_unit.py
+│   ├── test_analizador_sintaxis.py
+│   ├── test_analizador_logica.py
+│   ├── test_api_evidencia.py
+│   ├── test_evaluation_properties.py
+│   └── test_engagement_managers.py  # 38 tests engagement managers
 ├── requirements.txt
 ├── .env.example               # Plantilla de variables de entorno
 └── .streamlit/
