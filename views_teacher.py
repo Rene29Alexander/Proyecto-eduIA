@@ -13,6 +13,7 @@ import base64
 import time
 import html  # Importante para corregir el error visual del foro
 from datetime import datetime, date, timedelta
+from database import fmt_date, bytes_to_b64
 import traceback
 from utils_notifications import notification_manager
 import re
@@ -55,10 +56,11 @@ def init_teacher_state():
 def check_teacher_schema(conn):
     """Verifica y actualiza esquema necesario para el docente"""
     try:
+        from database import _adapt_sql, fmt_date
         c = conn.cursor()
         
         # Tabla Módulos
-        c.execute("""CREATE TABLE IF NOT EXISTS modules (
+        c.execute(_adapt_sql("""CREATE TABLE IF NOT EXISTS modules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             course_id INTEGER NOT NULL,
             title TEXT NOT NULL,
@@ -69,10 +71,10 @@ def check_teacher_schema(conn):
             is_published INTEGER DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE
-        )""")
+        )"""))
         
         # Tabla de foro mejorada
-        c.execute("""CREATE TABLE IF NOT EXISTS forum_posts (
+        c.execute(_adapt_sql("""CREATE TABLE IF NOT EXISTS forum_posts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             course_id INTEGER NOT NULL,
             user_id TEXT NOT NULL,
@@ -84,7 +86,7 @@ def check_teacher_schema(conn):
             date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE,
             FOREIGN KEY (user_id) REFERENCES users(username)
-        )""")
+        )"""))
         
         # Actualizaciones de columnas (safely)
         updates = [
@@ -133,7 +135,7 @@ def create_course_card(course, conn):
         desc = desc[:120] + "..."
     
     if course.get('cover_image'):
-        img_src = f"data:image/png;base64,{base64.b64encode(course['cover_image']).decode()}"
+        img_src = f"data:image/png;base64,{bytes_to_b64(course['cover_image'])}"
     else:
         img_src = "https://images.unsplash.com/photo-1501504905252-473c47e087f8?w=400&h=200&fit=crop"
     
@@ -189,7 +191,7 @@ def render_teacher_dashboard(conn, u):
     with col1:
         # Mostrar avatar del docente
         if u.get('avatar'):
-            avatar_b64 = base64.b64encode(u['avatar']).decode()
+            avatar_b64 = bytes_to_b64(u['avatar'])
             st.markdown(f"""
             <div style="display: flex; justify-content: center; margin-top: 10px;">
                 <img src="data:image/png;base64,{avatar_b64}" 
@@ -317,7 +319,7 @@ def render_teacher_course_view(conn, model, u):
     
     # Portada del curso
     if c.get('cover_image'):
-        b64_img = base64.b64encode(c['cover_image']).decode()
+        b64_img = bytes_to_b64(c['cover_image'])
         st.markdown(f"""
         <div style="
             width: 100%; 
@@ -973,11 +975,11 @@ def render_exam_creation_section(conn, model, course, module):
                 st.success(f"📂 {len(recent_pdfs)} PDF(s) encontrados en los últimos 7 días")
                 pdf_selected = st.selectbox(
                     "Selecciona un PDF:",
-                    [f"📄 {p['title']} ({p['date'][:10] if p['date'] else 'sin fecha'})" for p in recent_pdfs],
+                    [f"📄 {p['title']} ({fmt_date(p['date']) if p['date'] else 'sin fecha'})" for p in recent_pdfs],
                     key=f"pdf_sel_{module['id']}"
                 )
                 # Obtener el índice seleccionado
-                pdf_idx = [f"📄 {p['title']} ({p['date'][:10] if p['date'] else 'sin fecha'})" for p in recent_pdfs].index(pdf_selected)
+                pdf_idx = [f"📄 {p['title']} ({fmt_date(p['date']) if p['date'] else 'sin fecha'})" for p in recent_pdfs].index(pdf_selected)
                 selected_pdf_row = recent_pdfs[pdf_idx]
                 
                 # Leer el blob del PDF
@@ -1402,7 +1404,7 @@ Formato para desarrollo:
             
             try:
                 # Guardar examen
-                conn.execute(
+                _exam_cursor = conn.execute(
                     """
                     INSERT INTO exams 
                     (course_id, module_id, title, duration_minutes, passing_score) 
@@ -1410,7 +1412,7 @@ Formato para desarrollo:
                     """, 
                     (course['id'], module['id'], exam_title, exam_duration, passing_score)
                 )
-                exam_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                exam_id = _exam_cursor.lastrowid
                 
                 # Guardar preguntas
                 for q in st.session_state.exam_draft:
@@ -1932,7 +1934,7 @@ def render_forum_tab(conn, course, user):
         
         # Avatar
         if post.get('avatar'):
-            b64_av = base64.b64encode(post['avatar']).decode()
+            b64_av = bytes_to_b64(post['avatar'])
             img_html = f'<img src="data:image/png;base64,{b64_av}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">'
         else:
             img_html = '<img src="https://cdn-icons-png.flaticon.com/512/847/847969.png" style="width:40px;height:40px;border-radius:50%;">'
@@ -2494,10 +2496,12 @@ def render_settings_tab(conn, course):
 def view_teacher(conn, model):
     """Vista principal del docente"""
     try:
-        # Aquí se ejecuta el chequeo del esquema y se agrega la columna level si falta
-        if not check_teacher_schema(conn):
-            st.error("❌ Error crítico en la base de datos")
-            return
+        # Chequeo de esquema — solo una vez por sesión para no ejecutar ALTER TABLE en cada rerun
+        if not st.session_state.get('_teacher_schema_done'):
+            if not check_teacher_schema(conn):
+                st.error("❌ Error crítico en la base de datos")
+                return
+            st.session_state._teacher_schema_done = True
         
         init_teacher_state()
         u = st.session_state.user
@@ -2669,7 +2673,7 @@ def render_all_members_card_teacher(conn, member: dict, user_id: str, course_id:
     
     # Avatar
     if member.get('avatar'):
-        avatar_b64 = base64.b64encode(member['avatar']).decode('utf-8')
+        avatar_b64 = bytes_to_b64(member['avatar'])
         avatar_html = f'<img src="data:image/png;base64,{avatar_b64}" style="width: 48px; height: 48px; border-radius: 50%; object-fit: cover; border: 2px solid #58a6ff;">'
     else:
         initial = member['first_name'][0].upper() if member['first_name'] else 'U'
@@ -2741,7 +2745,7 @@ def render_contact_card_teacher(conn, contact: dict, user_id: str):
             # Verificar si tiene foto de perfil
             if contact.get('avatar'):
                 # Mostrar foto de perfil
-                avatar_b64 = base64.b64encode(contact['avatar']).decode()
+                avatar_b64 = bytes_to_b64(contact['avatar'])
                 st.markdown(f"""
                 <div style="
                     width: 48px;
@@ -3034,7 +3038,7 @@ def render_message_bubble_teacher(message: dict, is_own_message: bool):
     try:
         if message.get('sender_avatar') and message['sender_avatar']:
             # Tiene foto de perfil
-            avatar_b64 = base64.b64encode(message['sender_avatar']).decode('utf-8')
+            avatar_b64 = bytes_to_b64(message['sender_avatar'])
             avatar_content = f'<img src="data:image/png;base64,{avatar_b64}" style="width: 100%; height: 100%; object-fit: cover;">'
         else:
             # Sin foto, mostrar inicial
@@ -3055,7 +3059,7 @@ def render_message_bubble_teacher(message: dict, is_own_message: bool):
                 # Imágenes: mostrar miniatura inline
                 if file_type in ['image/png', 'image/jpeg', 'image/gif']:
                     try:
-                        img_b64 = base64.b64encode(file_data['file_content']).decode('utf-8')
+                        img_b64 = bytes_to_b64(file_data['file_content'])
                         attachments_html += f'<div style="margin-top: 8px;"><img src="data:{file_type};base64,{img_b64}" style="max-width: 200px; max-height: 200px; border-radius: 8px; display: block; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.3);" onclick="window.open(this.src, \'_blank\')"></div>'
                     except:
                         pass
@@ -3073,7 +3077,7 @@ def render_message_bubble_teacher(message: dict, is_own_message: bool):
                     file_name_short = attachment['file_name'][:30] + "..." if len(attachment['file_name']) > 30 else attachment['file_name']
                     
                     # Crear data URI para descarga
-                    file_b64 = base64.b64encode(file_data['file_content']).decode('utf-8')
+                    file_b64 = bytes_to_b64(file_data['file_content'])
                     data_uri = f"data:{file_type};base64,{file_b64}"
                     
                     attachments_html += f'<a href="{data_uri}" download="{attachment["file_name"]}" style="text-decoration: none; color: inherit;"><div style="margin-top: 8px; padding: 8px 12px; background: rgba(255,255,255,0.1); border-radius: 8px; display: inline-block; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background=\'rgba(255,255,255,0.2)\'" onmouseout="this.style.background=\'rgba(255,255,255,0.1)\'"><div style="font-size: 13px;">{file_icon} {file_name_short}</div><div style="font-size: 11px; opacity: 0.7; margin-top: 2px;">{size_str} • Click para descargar</div></div></a>'

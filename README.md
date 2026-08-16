@@ -56,7 +56,7 @@ La IA participa en tres momentos clave:
 | Elemento | Detalle |
 |---|---|
 | Tipo | IA Generativa — Large Language Model (LLM) |
-| Modelos soportados | `gemini-2.0-flash`, `gemini-1.5-flash`, `gemini-1.5-flash-8b`, `gemini-1.5-pro` |
+| Modelos soportados | `gemini-3.1-flash-lite-preview`, `gemini-2.5-flash-lite`, `gemini-3-flash`, `gemini-2.5-flash`, `gemini-2.0-flash`, `gemma-4-26b-a4b-it`, `gemma-3-27b-it` (y más, con fallback automático) |
 | Servicio | Google AI Studio API (`google-generativeai`) |
 | Técnica | Prompting con contexto dinámico (RAG simplificado) |
 | Pool de keys | Hasta 5 API keys con rotación automática por cuota |
@@ -114,7 +114,11 @@ Para el pool de API keys (rotación automática cuando se agota la cuota):
 GEMINI_API_KEY   = "tu_api_key_principal"
 GEMINI_API_KEY_2 = "tu_api_key_alternativa_2"
 GEMINI_API_KEY_3 = "tu_api_key_alternativa_3"
+GEMINI_API_KEY_4 = "tu_api_key_alternativa_4"
+GEMINI_API_KEY_5 = "tu_api_key_alternativa_5"
 ```
+
+> Las keys también se pueden configurar directamente desde el panel de administración (Configuración del Sistema > Pool de API Keys), sin necesidad de editar archivos manualmente.
 
 > No subir este archivo a repositorios públicos. Ver `.env.example` para referencia completa.
 
@@ -407,7 +411,7 @@ locust -f locustfile.py --tags validation   # solo casos 422
 | Semana 3 | ✅ Agregar pruebas automatizadas y pipeline CI/CD básico |
 | Semana 4 | ✅ Contenerizar con Docker y preparar despliegue en la nube |
 | Semana 5 | ✅ Observabilidad, instrumentación, pruebas de carga y escalabilidad |
-| Semana 6 | Revisar seguridad, documentación final y defensa técnica |
+| Semana 6 | 🔄 Revisar seguridad, documentación final y defensa técnica |
 
 ---
 

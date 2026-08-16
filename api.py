@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field, field_validator
 
 # ── Configuración propia (sin importar Streamlit) ────────────────────────────
 from config import DB_PATH, AI_CONFIG, DEBUG
+from database import db_manager
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -182,13 +183,12 @@ def _get_api_key() -> str:
     key = os.getenv("GEMINI_API_KEY", "").strip()
     if not key:
         try:
-            conn = sqlite3.connect(str(DB_PATH), timeout=5)
+            conn = db_manager.get_connection()
             row = conn.execute(
                 "SELECT value FROM system_settings WHERE key = 'gemini_api_key'"
             ).fetchone()
-            conn.close()
-            if row and row[0]:
-                key = row[0].strip()
+            if row and row['value']:
+                key = row['value'].strip()
         except Exception:
             pass
     return key
@@ -196,9 +196,8 @@ def _get_api_key() -> str:
 
 def _check_db() -> bool:
     try:
-        conn = sqlite3.connect(str(DB_PATH), timeout=5)
+        conn = db_manager.get_connection()
         conn.execute("SELECT 1")
-        conn.close()
         return True
     except Exception as exc:
         logger.warning("Fallo verificación BD: %s", exc)

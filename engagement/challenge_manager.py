@@ -103,13 +103,14 @@ class ChallengeManager:
                 (challenge_date, language, difficulty, title, description, exercise_code, 
                  solution_code, test_cases, points, bonus_points)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (challenge_date, language) DO NOTHING
             ''', (
                 today,
                 language,
                 challenge_data['difficulty'],
                 challenge_data['title'],
-                structured_description,  # Guardar como JSON
-                '',  # exercise_code vacío
+                structured_description,
+                '',
                 challenge_data.get('solution_code', ''),
                 json.dumps(challenge_data.get('test_cases', [])),
                 challenge_data['points'],
@@ -118,6 +119,13 @@ class ChallengeManager:
             
             conn.commit()
             challenge_id = c.lastrowid
+            # Si ya existía (DO NOTHING), buscar el id existente
+            if not challenge_id:
+                existing = c.execute(
+                    'SELECT id FROM daily_challenges WHERE challenge_date=? AND language=?',
+                    (today, language)
+                ).fetchone()
+                challenge_id = existing['id'] if existing else None
             
             # Retornar desafío generado
             return {
@@ -160,7 +168,8 @@ class ChallengeManager:
         if not challenge_data:
             return None
         
-        base_points, bonus_points = challenge_data
+        base_points  = challenge_data['points']
+        bonus_points = challenge_data['bonus_points']
         points_earned = 0
         
         if completed:
@@ -252,7 +261,7 @@ class ChallengeManager:
             FROM daily_challenge_attempts dca
             JOIN users u ON dca.user_id = u.username
             WHERE dca.challenge_id = ? AND dca.completed = 1
-            GROUP BY dca.user_id
+            GROUP BY dca.user_id, u.username, u.full_name
             ORDER BY best_score DESC, attempts ASC
             LIMIT ?
         ''', (challenge_id, limit)).fetchall()

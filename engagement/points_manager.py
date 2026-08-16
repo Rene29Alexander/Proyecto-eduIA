@@ -75,7 +75,10 @@ class PointsManager:
         if not user_data:
             return False
         
-        total_points, current_level, exp_points, points_to_next = user_data
+        total_points   = user_data['total_points']
+        current_level  = user_data['level']
+        exp_points     = user_data['experience_points']
+        points_to_next = user_data['points_to_next_level']
         
         # Actualizar puntos
         new_total = total_points + points
@@ -162,7 +165,13 @@ class PointsManager:
                 'progress_percentage': 0
             }
         
-        total, level, exp, points_to_next, weekly, monthly, rank = user_data
+        total    = user_data['total_points']
+        level    = user_data['level']
+        exp      = user_data['experience_points']
+        points_to_next = user_data['points_to_next_level']
+        weekly   = user_data['weekly_points']
+        monthly  = user_data['monthly_points']
+        rank     = user_data['rank_position']
         progress = (exp / points_to_next * 100) if points_to_next > 0 else 0
         
         return {

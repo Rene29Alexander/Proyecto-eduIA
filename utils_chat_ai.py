@@ -140,7 +140,9 @@ class ModuleChatManager:
         """
         try:
             rows = self.conn.execute("""
-                SELECT id, question_text, order_index
+                SELECT id,
+                       COALESCE(question_text, question) AS question_text,
+                       order_index
                 FROM module_ai_chat_suggested_questions
                 WHERE module_id = ?
                 ORDER BY order_index ASC
@@ -210,9 +212,10 @@ class ModuleChatManager:
             
             # Guardar conversación
             cursor = self.conn.execute("""
-                INSERT INTO module_ai_chat_conversations (module_id, student_id, message, response)
-                VALUES (?, ?, ?, ?)
-            """, (module_id, student_id, message, response))
+                INSERT INTO module_ai_chat_conversations
+                (module_id, student_id, user_id, role, content, message, response)
+                VALUES (?, ?, ?, 'user', ?, ?, ?)
+            """, (module_id, student_id, student_id, message, message, response))
             
             conversation_id = cursor.lastrowid
             self.conn.commit()
@@ -372,24 +375,8 @@ class GroupChatManager:
         self._ensure_table()
 
     def _ensure_table(self):
-        """Crea la tabla si no existe (por si la BD es antigua)"""
-        try:
-            self.conn.execute('''
-                CREATE TABLE IF NOT EXISTS module_ai_group_chat (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    module_id INTEGER NOT NULL,
-                    user_id TEXT NOT NULL,
-                    user_role TEXT NOT NULL DEFAULT 'student',
-                    message TEXT NOT NULL,
-                    response TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (module_id) REFERENCES modules(id) ON DELETE CASCADE,
-                    FOREIGN KEY (user_id) REFERENCES users(username) ON DELETE CASCADE
-                )
-            ''')
-            self.conn.commit()
-        except Exception:
-            pass
+        """Tabla module_ai_group_chat creada en database.py init_db — no-op."""
+        pass
 
     def get_chat_content(self, module_id):
         """Reutiliza el mismo contexto del chat individual del módulo"""
@@ -432,9 +419,10 @@ class GroupChatManager:
         # Guardar en BD
         try:
             self.conn.execute('''
-                INSERT INTO module_ai_group_chat (module_id, user_id, user_role, message, response)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (module_id, user_id, user_role, message, response_text))
+                INSERT INTO module_ai_group_chat
+                (module_id, user_id, user_role, role, content, message, response)
+                VALUES (?, ?, ?, 'user', ?, ?, ?)
+            ''', (module_id, user_id, user_role, message or '', message, response_text))
             self.conn.commit()
             return {'success': True, 'response': response_text}
         except Exception as e:

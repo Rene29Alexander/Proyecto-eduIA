@@ -61,10 +61,9 @@ class TeamManager:
         c = conn.cursor()
         
         teams = c.execute('''
-            SELECT t.team_name, t.total_points, t.level, COUNT(tm.user_id) as members
+            SELECT t.team_name, t.total_points, t.level,
+                   (SELECT COUNT(*) FROM team_members tm WHERE tm.team_id = t.id) as members
             FROM teams t
-            LEFT JOIN team_members tm ON t.id = tm.team_id
-            GROUP BY t.id
             ORDER BY t.total_points DESC
             LIMIT ?
         ''', (limit,)).fetchall()

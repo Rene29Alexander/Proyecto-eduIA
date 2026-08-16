@@ -3532,58 +3532,64 @@ class AIManager:
         
         # Calcular puntuación final
         final_score = round(base_score * p, 1)
+
+        # Determinar veredicto
+        if base_score >= 0.8:
+            icon, label = '✅', 'Correcta'
+        elif base_score >= 0.5:
+            icon, label = '⚠️', 'Parcialmente correcta'
+        else:
+            icon, label = '❌', 'Incorrecta'
         
-        return final_score, f"{feedback} (calificación automática - el profesor puede ajustar)"
+        return final_score, f"{icon} **{label}** — {feedback} (evaluación automática, el docente puede ajustar)"
     
     def grade_open_question_with_ai(self, q, a, p):
-        """Califica una pregunta de texto abierto usando IA (con timeout estricto)"""
-        # Si no hay respuesta, calificación 0
+        """Califica una pregunta de texto abierto usando IA con veredicto claro."""
         if not a or len(a.strip()) < 5:
-            return 0, "Sin respuesta o respuesta muy corta"
-        
-        # Prompt ultra-optimizado para velocidad
-        prompt = f"""Califica del 0 al {p}:
-P: {q[:250]}
-R: {a[:600]}
+            return 0, "❌ Sin respuesta o respuesta muy corta"
 
-Responde SOLO: {{"s":X,"f":"comentario corto"}}"""
-        
+        prompt = f"""Eres un evaluador académico. Califica la siguiente respuesta de examen.
+
+PREGUNTA: {q[:300]}
+RESPUESTA DEL ESTUDIANTE: {a[:700]}
+PUNTOS MÁXIMOS: {p}
+
+Evalúa si la respuesta es correcta, parcialmente correcta o incorrecta.
+Responde SOLO con este JSON (sin markdown, sin explicaciones):
+{{"puntos": <número entre 0 y {p}>, "veredicto": "correcta|parcial|incorrecta", "feedback": "<1-2 oraciones explicando el resultado>"}}"""
+
         try:
-            # Configuración ultra-rápida con timeout de 10 segundos
-            import signal
             import time
-            
             start_time = time.time()
-            
+
             res = self.call_with_retry(
                 prompt,
                 max_retries=1,
-                max_output_tokens=50,  # Muy corto
-                temperature=0.2,  # Muy determinista
-                timeout=10  # Timeout de 10 segundos
+                max_output_tokens=80,
+                temperature=0.2,
+                timeout=12
             )
-            
+
             elapsed = time.time() - start_time
-            
-            # Si tardó más de 10 segundos o hay error, usar fallback
-            if elapsed > 10 or not res or "Error" in res or "Timeout" in res:
+            if elapsed > 12 or not res or "Error" in res or "Timeout" in res:
                 return self.grade_open_question(q, a, p)
-            
-            # Intentar parsear JSON
-            import re
-            json_match = re.search(r'\{[^}]+\}', res)
+
+            import re, json
+            json_match = re.search(r'\{[^}]+\}', res, re.DOTALL)
             if json_match:
-                import json
                 parsed = json.loads(json_match.group())
-                score = float(parsed.get('s', p * 0.5))
-                feedback = parsed.get('f', 'Calificado con IA')
-                score = max(0, min(score, p))
-                return score, feedback
-        except Exception as e:
-            # Si falla, usar calificación automática
+                score    = max(0, min(float(parsed.get('puntos', p * 0.5)), p))
+                veredicto = parsed.get('veredicto', 'parcial').lower()
+                feedback  = parsed.get('feedback', '')
+
+                icons = {'correcta': '✅', 'parcial': '⚠️', 'incorrecta': '❌'}
+                icon = icons.get(veredicto, '💬')
+                label = {'correcta': 'Correcta', 'parcial': 'Parcialmente correcta', 'incorrecta': 'Incorrecta'}.get(veredicto, veredicto.capitalize())
+
+                return round(score, 1), f"{icon} **{label}** — {feedback}"
+        except Exception:
             pass
-        
-        # Fallback: usar calificación automática
+
         return self.grade_open_question(q, a, p)
     
     # ========== MÉTODOS PARA ESTRUCTURA POR TEMAS EN ESPAÑOL ==========
@@ -5697,6 +5703,9 @@ def get_socratic_hint(model, code, error_msg, lang):
     return ai_manager.get_socratic_hint(code, error_msg, lang)
 
 def ai_grade_open_question(model, question, student_answer, max_points):
+    """Califica pregunta abierta con IA. Usa la versión con IA si hay modelo disponible."""
+    if model and ai_manager.model:
+        return ai_manager.grade_open_question_with_ai(question, student_answer, max_points)
     return ai_manager.grade_open_question(question, student_answer, max_points)
 
 def ai_generate_exam_from_text(model, context_text, num_questions, num_options):

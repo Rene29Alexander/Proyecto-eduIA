@@ -17,3 +17,8 @@ port = 8501
 
 [runner]
 magicEnabled = false
+
+[client]
+# Reducir animación del spinner para que la recarga se sienta más rápida
+showErrorDetails = true
+toolbarMode = "minimal"

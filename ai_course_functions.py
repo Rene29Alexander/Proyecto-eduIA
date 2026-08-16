@@ -7,6 +7,7 @@ Todas las mejoras implementadas aquí
 import streamlit as st
 import streamlit.components.v1 as components
 from datetime import datetime
+from database import fmt_date
 
 def fix_language_in_text(text, correct_language):
     """Corrige menciones incorrectas de lenguajes en el texto y limpia caracteres mal codificados"""
@@ -1767,7 +1768,7 @@ def render_section_exercise(conn, user, model, section, ai_course, sections_rows
                 
                 if not exercise_record:
                     # Crear registro dummy para el banco de preguntas
-                    conn.execute("""
+                    _ex_cursor = conn.execute("""
                         INSERT INTO ai_topic_exercises 
                         (topic_id, question, exercise_type, points, difficulty_level, topic_area)
                         VALUES (?, ?, ?, ?, ?, ?)
@@ -1780,7 +1781,7 @@ def render_section_exercise(conn, user, model, section, ai_course, sections_rows
                         "general"
                     ))
                     conn.commit()
-                    exercise_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                    exercise_id = _ex_cursor.lastrowid
                 else:
                     exercise_id = exercise_record[0]
                 
@@ -2511,7 +2512,7 @@ def render_course_settings(conn, user, model, ai_course, ai_course_id):
         st.info(f"**Nivel:** {ai_course['level'].title()}")
     
     with col2:
-        st.info(f"**Creado:** {ai_course['created_at'][:10]}")
+        st.info(f"**Creado:** {fmt_date(ai_course['created_at'])}")
         st.info(f"**Estado:** {ai_course.get('status', 'active').title()}")
     
     st.markdown("---")
