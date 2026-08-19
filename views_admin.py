@@ -1392,22 +1392,13 @@ def view_admin(conn):
                     
                     # Actualizar variable de sesión
                     st.session_state.ai_available = ai_enabled
-                    
-                    # Actualizar archivo secrets.toml si cambió la API key
+
+                    # En Streamlit Cloud el filesystem es read-only, no se puede
+                    # escribir secrets.toml — la API key ya se guardó en system_settings
+                    # (conn.execute arriba) y se leerá desde ahí al inicializar AIManager.
                     if gemini_api_key and gemini_api_key != current_api_key:
-                        try:
-                            import os
-                            secrets_path = ".streamlit/secrets.toml"
-                            os.makedirs(".streamlit", exist_ok=True)
-                            
-                            with open(secrets_path, 'w') as f:
-                                f.write(f'# API Key de Gemini\n')
-                                f.write(f'GEMINI_API_KEY = "{gemini_api_key}"\n')
-                            
-                            st.success("✅ Configuración guardada exitosamente")
-                            st.info("🔄 Reinicia la aplicación para que los cambios de la API key surtan efecto")
-                        except Exception as e:
-                            st.warning(f"⚠️ Configuración guardada pero no se pudo actualizar secrets.toml: {e}")
+                        st.success("✅ Configuración guardada exitosamente")
+                        st.info("🔄 Reinicia la aplicación para que los cambios de la API key surtan efecto")
                     else:
                         st.success("✅ Configuración guardada exitosamente")
                     
@@ -1457,7 +1448,7 @@ def view_admin(conn):
                 )
                 # Leer desde session_state para garantizar el valor más reciente
                 new_db_url = st.session_state.get("admin_db_url_input", new_db_url)
-                st.caption("⚠️ Esta URL contiene tu contraseña. Se guardará en `.streamlit/secrets.toml` (no se sube a GitHub).")
+                st.caption("⚠️ Esta URL contiene tu contraseña. Se guardará en la base de datos del sistema (no en el repositorio).")
             else:
                 new_db_url = ""
                 st.info("💡 Se usará SQLite local (`learning_platform.db`). No se necesita configuración adicional.")
@@ -1486,29 +1477,20 @@ def view_admin(conn):
                 if st.button("💾 Guardar configuración BD", type="primary", key="admin_db_save", use_container_width=True):
                     url_to_save = st.session_state.get("admin_db_url_input", "").strip()
                     try:
-                        import os as _os2
-                        secrets_path = ".streamlit/secrets.toml"
-                        _os2.makedirs(".streamlit", exist_ok=True)
-
-                        # Leer secrets.toml existente
-                        existing_lines = []
-                        if _os2.path.exists(secrets_path):
-                            with open(secrets_path, 'r', encoding='utf-8') as f:
-                                existing_lines = [
-                                    line for line in f.readlines()
-                                    if not line.startswith("DATABASE_URL")
-                                ]
-
-                        # Reescribir con o sin DATABASE_URL
-                        with open(secrets_path, 'w', encoding='utf-8') as f:
-                            for line in existing_lines:
-                                f.write(line)
-                            if url_to_save and db_option == "PostgreSQL / Supabase (producción)":
-                                f.write(f'\nDATABASE_URL = "{url_to_save}"\n')
-
+                        # Guardar DATABASE_URL en system_settings (compatible con Streamlit Cloud)
                         if url_to_save and db_option == "PostgreSQL / Supabase (producción)":
+                            conn.execute("""
+                                INSERT OR REPLACE INTO system_settings (key, value, updated_at)
+                                VALUES ('database_url', ?, ?)
+                            """, (url_to_save, datetime.now()))
+                            conn.commit()
                             st.success("✅ URL de PostgreSQL guardada. Reinicia la app para aplicar el cambio.")
                         else:
+                            conn.execute("""
+                                INSERT OR REPLACE INTO system_settings (key, value, updated_at)
+                                VALUES ('database_url', '', ?)
+                            """, (datetime.now(),))
+                            conn.commit()
                             st.success("✅ Configurado para usar SQLite. Reinicia la app para aplicar el cambio.")
                         st.info("🔄 Para reiniciar: cierra la app y vuelve a ejecutar `streamlit run main.py`")
                     except Exception as e:
