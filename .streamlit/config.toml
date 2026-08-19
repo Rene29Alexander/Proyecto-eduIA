@@ -12,8 +12,6 @@ gatherUsageStats = false
 maxUploadSize = 50
 enableCORS = false
 enableXsrfProtection = true
-address = "localhost"
-port = 8501
 
 [runner]
 magicEnabled = false
