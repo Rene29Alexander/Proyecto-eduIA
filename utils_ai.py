@@ -5686,54 +5686,43 @@ def extract_text_from_pdf(file_bytes):
 
 def display_pdf(file_bytes):
     """
-    Muestra un PDF página por página como imágenes de alta calidad.
-    Usa PyMuPDF (fitz) para renderizar sin depender de poppler.
-    Compatible con Brave y todos los navegadores (no usa iframe/data URL).
+    Muestra el visor nativo del navegador (zoom, navegación por páginas, etc.)
+    usando un Blob URL generado por JavaScript — compatible con Brave.
+    Brave bloquea iframe src="data:..." pero NO bloquea Blob URLs creadas via JS.
     """
     if not file_bytes:
         return
     try:
-        import io
-        import fitz  # PyMuPDF
+        import streamlit.components.v1 as components
+        b64 = base64.b64encode(file_bytes).decode('utf-8')
 
-        doc = fitz.open(stream=file_bytes, filetype="pdf")
-        num_pages = doc.page_count
-        st.markdown(f"**📄 PDF — {num_pages} página(s)**")
+        html = f"""
+        <!DOCTYPE html>
+        <html style="margin:0;padding:0;height:100%;background:#1e1e1e;">
+        <body style="margin:0;padding:0;height:100%;background:#1e1e1e;">
+        <iframe id="pdfFrame" width="100%" height="650px"
+                style="border:none;border-radius:6px;background:#fff;"
+                allowfullscreen></iframe>
+        <script>
+            (function() {{
+                var b64 = "{b64}";
+                var binary = atob(b64);
+                var bytes = new Uint8Array(binary.length);
+                for (var i = 0; i < binary.length; i++) {{
+                    bytes[i] = binary.charCodeAt(i);
+                }}
+                var blob = new Blob([bytes], {{ type: "application/pdf" }});
+                var url  = URL.createObjectURL(blob);
+                document.getElementById("pdfFrame").src = url;
+            }})();
+        </script>
+        </body>
+        </html>
+        """
+        components.html(html, height=660, scrolling=False)
 
-        for i in range(num_pages):
-            page = doc[i]
-            # Renderizar a 2x para buena resolución
-            mat = fitz.Matrix(2.0, 2.0)
-            pix = page.get_pixmap(matrix=mat)
-            img_bytes = pix.tobytes("png")
-            st.image(img_bytes, caption=f"Página {i + 1} de {num_pages}",
-                     use_container_width=True)
-
-        doc.close()
-
-    except ImportError:
-        # PyMuPDF no disponible — fallback a texto con pypdf
-        _display_pdf_text_fallback(file_bytes)
     except Exception as e:
-        st.warning(f"⚠️ No se pudo renderizar el PDF. ({e})")
-        _display_pdf_text_fallback(file_bytes)
-
-
-def _display_pdf_text_fallback(file_bytes):
-    """Extrae texto del PDF como último recurso cuando no hay renderizador visual."""
-    try:
-        import io
-        from pypdf import PdfReader
-        reader = PdfReader(io.BytesIO(file_bytes))
-        num_pages = len(reader.pages)
-        st.caption(f"📄 {num_pages} página(s) — vista de texto. Descarga el archivo para ver el PDF con formato.")
-        for i, page in enumerate(reader.pages):
-            text = page.extract_text() or ""
-            if text.strip():
-                with st.expander(f"Página {i + 1}", expanded=(i == 0)):
-                    st.text(text)
-    except Exception:
-        st.info("⚠️ No se pudo mostrar el PDF. Usa el botón ⬇️ para descargarlo.")
+        st.warning(f"⚠️ No se pudo mostrar el PDF. Usa el botón ⬇️ para descargarlo. ({e})")
 
 # Instancia global
 ai_manager = AIManager()
