@@ -16,6 +16,40 @@ from datetime import date, timedelta
 # Helpers para construir mocks de conexión SQLite
 # ---------------------------------------------------------------------------
 
+def make_row(data, columns=None):
+    """
+    Crea un objeto que soporta acceso tanto por índice (row[0])
+    como por nombre de columna (row['col']) — igual que sqlite3.Row.
+    data puede ser una tupla o un dict.
+    Si es tupla, se requieren columns para el acceso por nombre.
+    Si es dict, el acceso por nombre es directo.
+    """
+    if data is None:
+        return None
+    if isinstance(data, dict):
+        cols = list(data.keys())
+        vals = list(data.values())
+    else:
+        cols = columns or []
+        vals = list(data)
+
+    class _Row:
+        def __getitem__(self, key):
+            if isinstance(key, int):
+                return vals[key]
+            if key in cols:
+                return vals[cols.index(key)]
+            raise KeyError(key)
+        def __iter__(self):
+            return iter(vals)
+        def __len__(self):
+            return len(vals)
+        def __bool__(self):
+            return True
+
+    return _Row()
+
+
 def make_cursor(*fetchone_values, fetchall_value=None):
     """Crea un cursor mock con respuestas configuradas."""
     cursor = MagicMock()
@@ -117,8 +151,12 @@ class TestPointsManagerConBD:
         """Retorna los datos correctos cuando el usuario existe en BD."""
         from engagement.points_manager import PointsManager
 
-        # Simula: total=200, level=2, exp=50, pts_to_next=150, weekly=20, monthly=100, rank=3
-        row = (200, 2, 50, 150, 20, 100, 3)
+        # Simula row con acceso por nombre de columna
+        row = make_row({
+            'total_points': 200, 'level': 2, 'experience_points': 50,
+            'points_to_next_level': 150, 'weekly_points': 20,
+            'monthly_points': 100, 'rank_position': 3
+        })
         cursor = make_cursor(row)
         conn = make_conn(cursor)
 
@@ -260,10 +298,13 @@ class TestStreakManagerConBD:
         from engagement.streak_manager import StreakManager
         from datetime import timezone
 
-        # Usamos la misma fecha que _today() usa internamente (UTC)
         today_utc = date.today()
         today_str = today_utc.isoformat()
-        row = (5, 10, today_str, 0, 30)
+        row = make_row({
+            'current_streak': 5, 'longest_streak': 10,
+            'last_activity_date': today_str, 'freeze_count': 0,
+            'total_days_active': 30
+        })
 
         cursor = MagicMock()
         cursor.execute.return_value = cursor
@@ -271,13 +312,11 @@ class TestStreakManagerConBD:
         cursor.rowcount = 1
         conn = make_conn(cursor)
 
-        # Mockeamos _today() para garantizar consistencia UTC/local en cualquier entorno
         with patch('engagement.streak_manager.db_manager') as mock_db, \
              patch.object(StreakManager, '_today', return_value=today_utc):
             mock_db.get_connection.return_value = conn
             result = StreakManager.get_streak_info('usuario1')
 
-        # days_since = 0 → is_at_risk = False
         assert result['current_streak'] == 5
         assert result['longest_streak'] == 10
         assert result['is_at_risk'] is False
@@ -288,7 +327,11 @@ class TestStreakManagerConBD:
         from engagement.streak_manager import StreakManager
 
         hace_dos_dias = (date.today() - timedelta(days=2)).isoformat()
-        row = (7, 7, hace_dos_dias, 0, 20)
+        row = make_row({
+            'current_streak': 7, 'longest_streak': 7,
+            'last_activity_date': hace_dos_dias, 'freeze_count': 0,
+            'total_days_active': 20
+        })
         cursor = make_cursor(row, row, row)
         conn = make_conn(cursor)
 
@@ -329,7 +372,11 @@ class TestStreakManagerConBD:
         """No se resetea si la racha ya es 0."""
         from engagement.streak_manager import StreakManager
 
-        row = (0, 0, None, 0, 0)  # current_streak = 0
+        row = make_row({
+            'current_streak': 0, 'longest_streak': 0,
+            'last_activity_date': None, 'freeze_count': 0,
+            'total_days_active': 0
+        })
         cursor = make_cursor(row)
         conn = make_conn(cursor)
 
