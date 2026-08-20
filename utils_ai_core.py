@@ -225,19 +225,21 @@ class AIManagerCore:
 
     def _init_model(self):
         """Inicializa el modelo probando en orden de preferencia."""
-        import google.generativeai as genai
+        from google import genai
+        from google.genai import types as genai_types
 
         key = self.key_pool.get_active_key() or self.api_key
-        genai.configure(api_key=key)
+        self._genai_client = genai.Client(api_key=key)
 
         for model_name in self.MODELS:
             try:
-                self.model = genai.GenerativeModel(model_name)
-                # Prueba mínima para verificar que funciona
-                self.model.generate_content(
-                    "test",
-                    generation_config={"max_output_tokens": 5},
+                # Prueba mínima para verificar que el modelo responde
+                self._genai_client.models.generate_content(
+                    model=model_name,
+                    contents="test",
+                    config=genai_types.GenerateContentConfig(max_output_tokens=5),
                 )
+                self.model = model_name          # guardamos el nombre, no un objeto
                 self.current_model_name = model_name
                 logger.info("Modelo inicializado: %s", model_name)
                 return
@@ -268,14 +270,18 @@ class AIManagerCore:
         last_exc = None
         for attempt in range(retries):
             try:
-                active_key = self.key_pool.get_active_key()
-                if active_key and active_key != self.api_key:
-                    import google.generativeai as genai
-                    genai.configure(api_key=active_key)
+                from google import genai
+                from google.genai import types as genai_types
 
-                response = self.model.generate_content(
-                    prompt,
-                    generation_config={"max_output_tokens": max_tokens},
+                active_key = self.key_pool.get_active_key() or self.api_key
+                client = genai.Client(api_key=active_key)
+
+                response = client.models.generate_content(
+                    model=self.model,
+                    contents=prompt,
+                    config=genai_types.GenerateContentConfig(
+                        max_output_tokens=max_tokens
+                    ),
                 )
                 text = response.text.strip()
 

@@ -19,6 +19,7 @@ import logging
 import traceback
 from collections import defaultdict
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Request, status
@@ -26,16 +27,66 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel, Field, field_validator
 
+# ── Cargar variables de entorno desde .env si existe ─────────────────────────
+def _load_dotenv():
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    if not os.path.exists(env_path):
+        return
+    with open(env_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip()
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+_load_dotenv()
+
 # ── Configuración propia (sin importar Streamlit) ────────────────────────────
-from config import DB_PATH, AI_CONFIG, DEBUG
+from config import DB_PATH, AI_CONFIG, DEBUG, LOGS_DIR
 from database import db_manager
+from agent_monitor import monitor_agent
 
 # ── Logging ──────────────────────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.DEBUG if DEBUG else logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
+_LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+_LOG_LEVEL  = logging.DEBUG if DEBUG else logging.INFO
+
+# Handler consola (siempre activo, se configura con basicConfig)
+logging.basicConfig(level=_LOG_LEVEL, format=_LOG_FORMAT)
+
 logger = logging.getLogger("eduia.api")
+
+
+def _setup_file_logging():
+    """
+    Registra el RotatingFileHandler en el root logger.
+    Se llama desde el startup event de FastAPI, DESPUÉS de que uvicorn
+    termina su propio dictConfig — así el handler no es reemplazado.
+    """
+    log_file = str(LOGS_DIR / "api.log")
+
+    fh = RotatingFileHandler(
+        filename=log_file,
+        maxBytes=10 * 1024 * 1024,   # 10 MB
+        backupCount=5,
+        encoding="utf-8",
+    )
+    fh.setLevel(logging.INFO)
+    fh.setFormatter(logging.Formatter(_LOG_FORMAT))
+
+    # Agregar directamente a los loggers relevantes (no al root que uvicorn gestiona)
+    for _name in ("eduia.api", "uvicorn.access", "uvicorn.error"):
+        _lg = logging.getLogger(_name)
+        # Evitar duplicados en hot-reload
+        if not any(isinstance(h, RotatingFileHandler) and h.baseFilename == log_file
+                   for h in _lg.handlers):
+            _lg.addHandler(fh)
+            _lg.setLevel(logging.INFO)
+
+    logger.info("File logging activo: %s", log_file)
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 SUPPORTED_LANGUAGES: List[str] = [
@@ -150,6 +201,38 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(RequestIDMiddleware)
+
+# =============================================================================
+# Middleware — security headers (rúbrica: seguridad)
+# =============================================================================
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Añade cabeceras de seguridad HTTP estándar a todas las respuestas."""
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
+
+# =============================================================================
+# Startup — configurar file logging después de que uvicorn inicializa el suyo
+# =============================================================================
+
+@app.on_event("startup")
+async def startup_event():
+    _setup_file_logging()
+    # Arrancar el agente monitor en background
+    # Intentamos inyectar el AI manager si ya hay key configurada
+    ai_mgr, _ = _build_ai_manager()
+    monitor_agent.start(ai_manager=ai_mgr)
 
 # =============================================================================
 # Manejador global — evita exponer stacktraces al cliente
@@ -779,3 +862,23 @@ async def api_stats():
         },
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+
+# =============================================================================
+# ── Endpoint del agente monitor ───────────────────────────────────────────────
+# =============================================================================
+
+@app.get(
+    "/api/monitor",
+    summary="Estado del agente supervisor y ultimas alertas",
+    tags=["Sistema"],
+)
+async def get_monitor_status():
+    """
+    Retorna el estado del agente de monitoreo en background:
+    - Si esta activo y desde cuando
+    - Si tiene diagnostico con Gemini disponible
+    - Ultimas 5 alertas con diagnostico en lenguaje natural
+    - Total de alertas generadas desde el inicio
+    """
+    return monitor_agent.get_status()
