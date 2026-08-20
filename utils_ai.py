@@ -5686,9 +5686,9 @@ def extract_text_from_pdf(file_bytes):
 
 def display_pdf(file_bytes):
     """
-    Muestra el visor nativo del navegador (zoom, navegación por páginas, etc.)
-    usando un Blob URL generado por JavaScript — compatible con Brave.
-    Brave bloquea iframe src="data:..." pero NO bloquea Blob URLs creadas via JS.
+    Renderiza el PDF usando PDF.js (Mozilla) sobre un <canvas>.
+    No usa iframes ni data:/blob: URLs — Brave no puede bloquearlo.
+    Incluye navegación por páginas y zoom.
     """
     if not file_bytes:
         return
@@ -5696,30 +5696,136 @@ def display_pdf(file_bytes):
         import streamlit.components.v1 as components
         b64 = base64.b64encode(file_bytes).decode('utf-8')
 
-        html = f"""
-        <!DOCTYPE html>
-        <html style="margin:0;padding:0;height:100%;background:#1e1e1e;">
-        <body style="margin:0;padding:0;height:100%;background:#1e1e1e;">
-        <iframe id="pdfFrame" width="100%" height="650px"
-                style="border:none;border-radius:6px;background:#fff;"
-                allowfullscreen></iframe>
-        <script>
-            (function() {{
-                var b64 = "{b64}";
-                var binary = atob(b64);
-                var bytes = new Uint8Array(binary.length);
-                for (var i = 0; i < binary.length; i++) {{
-                    bytes[i] = binary.charCodeAt(i);
-                }}
-                var blob = new Blob([bytes], {{ type: "application/pdf" }});
-                var url  = URL.createObjectURL(blob);
-                document.getElementById("pdfFrame").src = url;
-            }})();
-        </script>
-        </body>
-        </html>
-        """
-        components.html(html, height=660, scrolling=False)
+        html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ background: #525659; font-family: Arial, sans-serif; }}
+
+  #toolbar {{
+    background: #474747;
+    padding: 6px 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #fff;
+    font-size: 13px;
+    border-bottom: 1px solid #333;
+  }}
+  #toolbar button {{
+    background: #666;
+    color: #fff;
+    border: none;
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+  }}
+  #toolbar button:hover {{ background: #888; }}
+  #toolbar button:disabled {{ background: #444; color: #888; cursor: default; }}
+  #page-info {{ min-width: 90px; text-align: center; }}
+  #zoom-select {{
+    background: #666; color: #fff; border: none;
+    padding: 4px 6px; border-radius: 4px; cursor: pointer;
+  }}
+
+  #canvas-container {{
+    overflow-y: auto;
+    height: calc(100vh - 42px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 16px;
+    gap: 12px;
+  }}
+
+  canvas {{
+    background: #fff;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    max-width: 100%;
+  }}
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <button id="btn-prev" onclick="changePage(-1)">&#9664; Anterior</button>
+  <span id="page-info">Cargando...</span>
+  <button id="btn-next" onclick="changePage(1)">Siguiente &#9654;</button>
+  <select id="zoom-select" onchange="changeZoom(this.value)">
+    <option value="0.75">75%</option>
+    <option value="1.0" selected>100%</option>
+    <option value="1.25">125%</option>
+    <option value="1.5">150%</option>
+    <option value="2.0">200%</option>
+  </select>
+  <span style="margin-left:8px;color:#aaa;font-size:11px;">Vista PDF</span>
+</div>
+
+<div id="canvas-container">
+  <canvas id="pdf-canvas"></canvas>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+  var pdfDoc   = null;
+  var pageNum  = 1;
+  var scale    = 1.0;
+  var canvas   = document.getElementById('pdf-canvas');
+  var ctx      = canvas.getContext('2d');
+
+  var b64 = "{b64}";
+  var raw = atob(b64);
+  var arr = new Uint8Array(raw.length);
+  for (var i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+
+  pdfjsLib.getDocument({{ data: arr }}).promise.then(function(pdf) {{
+    pdfDoc = pdf;
+    updatePageInfo();
+    renderPage(pageNum);
+  }}).catch(function(err) {{
+    document.getElementById('canvas-container').innerHTML =
+      '<p style="color:#f88;padding:20px;">Error cargando PDF: ' + err.message + '</p>';
+  }});
+
+  function renderPage(num) {{
+    pdfDoc.getPage(num).then(function(page) {{
+      var viewport = page.getViewport({{ scale: scale }});
+      canvas.width  = viewport.width;
+      canvas.height = viewport.height;
+      page.render({{ canvasContext: ctx, viewport: viewport }});
+    }});
+  }}
+
+  function updatePageInfo() {{
+    document.getElementById('page-info').textContent =
+      'Pág. ' + pageNum + ' / ' + pdfDoc.numPages;
+    document.getElementById('btn-prev').disabled = (pageNum <= 1);
+    document.getElementById('btn-next').disabled = (pageNum >= pdfDoc.numPages);
+  }}
+
+  function changePage(delta) {{
+    var next = pageNum + delta;
+    if (next < 1 || next > pdfDoc.numPages) return;
+    pageNum = next;
+    updatePageInfo();
+    renderPage(pageNum);
+  }}
+
+  function changeZoom(val) {{
+    scale = parseFloat(val);
+    renderPage(pageNum);
+  }}
+</script>
+</body>
+</html>"""
+
+        components.html(html, height=700, scrolling=False)
 
     except Exception as e:
         st.warning(f"⚠️ No se pudo mostrar el PDF. Usa el botón ⬇️ para descargarlo. ({e})")
