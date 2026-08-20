@@ -1390,6 +1390,9 @@ def view_admin(conn):
                     
                     conn.commit()
                     
+                    # Señalizar que el logo cambió para limpiar cache en main.py
+                    st.session_state['logo_cache_dirty'] = True
+                    
                     # Actualizar variable de sesión
                     st.session_state.ai_available = ai_enabled
 

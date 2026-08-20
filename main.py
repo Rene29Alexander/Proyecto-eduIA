@@ -303,9 +303,9 @@ def process_login_logic(username, password):
         db_manager.log_activity(username, 'login_failed_pwd', ip=ip)
         return False
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=30, show_spinner=False)
 def get_logo_config():
-    """Obtiene la configuración del logo desde la base de datos (cacheado 5 min)"""
+    """Obtiene la configuración del logo desde la base de datos (cacheado 30 seg)"""
     try:
         logo_data = db_manager.get_connection().execute(
             "SELECT value FROM system_settings WHERE key = 'logo_url'"
@@ -318,9 +318,9 @@ def get_logo_config():
     except:
         return None
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=30, show_spinner=False)
 def get_background_config():
-    """Obtiene la configuración del fondo del login desde la base de datos (cacheado 5 min)"""
+    """Obtiene la configuración del fondo del login desde la base de datos (cacheado 30 seg)"""
     try:
         bg_data = db_manager.get_connection().execute(
             "SELECT value FROM system_settings WHERE key = 'login_background_url'"
@@ -426,6 +426,11 @@ def render_register_form():
 def render_login_screen():
     """Pantalla de Login elegante con logo y fondo personalizables - Estilo imagen de referencia"""
     
+    # Si el admin acaba de guardar configuración, limpiar cache del logo
+    if st.session_state.pop('logo_cache_dirty', False):
+        get_logo_config.clear()
+        get_background_config.clear()
+
     # Obtener logo y fondo configurados
     logo_url = get_logo_config()
     background_url = get_background_config()
