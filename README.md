@@ -12,10 +12,13 @@
 | **Repositorio** | https://github.com/Rene29Alexander/Proyecto-eduIA |
 | **Versión** | v1.0.0 |
 | **Release** | [v1.0.0](https://github.com/Rene29Alexander/Proyecto-eduIA/releases/tag/v1.0.0) |
-| **Commit** | `a8be18f` |
+| **Commit demostrado** | `a8be18f` |
 | **Pipeline CI/CD** | [![CI](https://github.com/Rene29Alexander/Proyecto-eduIA/actions/workflows/ci.yml/badge.svg)](https://github.com/Rene29Alexander/Proyecto-eduIA/actions) |
 | **Informe final** | [docs/final/informe-final.md](docs/final/informe-final.md) |
+| **Plan de contingencia** | [docs/final/plan-contingencia-demo.md](docs/final/plan-contingencia-demo.md) |
+| **Manifiesto de release** | [release-manifest.yml](release-manifest.yml) |
 | **Credenciales demo** | Usuario: `admin` / Contraseña: `admin123` |
+| **Estado del servicio** | https://eduiaiugb.streamlit.app/health (cuando API corre localmente: http://localhost:8000/health) |
 
 ---
 
