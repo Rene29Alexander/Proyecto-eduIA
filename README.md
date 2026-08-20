@@ -77,7 +77,9 @@ La IA participa en tres momentos clave:
 |---|---|
 | Tipo | IA Generativa — Large Language Model (LLM) |
 | Modelos soportados | `gemini-3.1-flash-lite-preview`, `gemini-2.5-flash-lite`, `gemini-3-flash`, `gemini-2.5-flash`, `gemini-2.0-flash`, `gemma-4-26b-a4b-it`, `gemma-3-27b-it` (y más, con fallback automático) |
-| Servicio | Google AI Studio API (`google-generativeai`) |
+| Librería API (Streamlit) | `google-generativeai` (legacy, mantenida por compatibilidad) |
+| Librería API (núcleo) | `google-genai` — librería oficial nueva, usada por `utils_ai_core.py` |
+| Servicio | Google AI Studio API |
 | Técnica | Prompting con contexto dinámico (RAG simplificado) |
 | Pool de keys | Hasta 5 API keys con rotación automática por cuota |
 
@@ -147,6 +149,12 @@ GEMINI_API_KEY_4 = "tu_api_key_alternativa_4"
 GEMINI_API_KEY_5 = "tu_api_key_alternativa_5"
 ```
 
+Para activar las alertas del agente monitor en Discord (opcional):
+
+```toml
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/tu_id/tu_token"
+```
+
 > Las keys también se pueden configurar directamente desde el panel de administración (Configuración del Sistema > Pool de API Keys), sin necesidad de editar archivos manualmente.
 
 > No subir este archivo a repositorios públicos. Ver `.env.example` para referencia completa.
@@ -163,11 +171,12 @@ GEMINI_API_KEY_5 = "tu_api_key_alternativa_5"
 ## 10. Limitaciones conocidas del prototipo
 
 - Depende de internet y disponibilidad de la API de Gemini
-- La librería `google-generativeai` está deprecada — requiere migración a `google.genai`
+- `utils_ai.py` aún usa `google-generativeai` (legacy) — `utils_ai_core.py` ya migró a `google.genai`
 - La generación de exámenes no siempre produce el número exacto de preguntas solicitadas
 - Sin autenticación por tokens JWT (solo sesión en memoria de Streamlit)
 - En modo SQLite (desarrollo local), no soporta múltiples instancias simultáneas — usar PostgreSQL para producción
 - Streamlit Cloud duerme la app tras 7 días sin tráfico (~30s para despertar)
+- El agente monitor Discord requiere filesystem persistente — en Streamlit Cloud solo funciona el endpoint `/api/monitor`
 
 ---
 
@@ -280,9 +289,23 @@ El flag `--reload` reinicia el servidor automáticamente al detectar cambios.
 | `GET` | `/health` | Sistema | Estado del servicio y BD |
 | `GET` | `/metadata` | Sistema | Versión, tecnologías y capacidades |
 | `GET` | `/api/stats` | Sistema | Métricas de cache, rate limiting y modelo IA |
+| `GET` | `/api/monitor` | Sistema | Estado del agente supervisor y últimas alertas |
 | `POST` | `/api/evaluate` | IA | Evaluación inteligente de código |
 | `POST` | `/api/courses/generate` | IA | Genera estructura de curso personalizado |
 | `POST` | `/api/chat/ask` | IA | Chat educativo contextualizado por material |
+
+### Cabeceras de seguridad (Sesión 6)
+
+Todas las respuestas incluyen automáticamente:
+
+```
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+X-XSS-Protection: 1; mode=block
+Strict-Transport-Security: max-age=31536000; includeSubDomains
+Referrer-Policy: strict-origin-when-cross-origin
+Permissions-Policy: geolocation=(), microphone=(), camera=()
+```
 
 ### Ejemplos rápidos
 
@@ -534,7 +557,69 @@ Ya incluido en `requirements.txt`.
 
 ---
 
-## 15. Plan de mejora — Semanas 2 a 6
+## 15. Seguridad y agente monitor (Sesión 6)
+
+### Security Headers
+
+La API agrega automáticamente cabeceras de seguridad HTTP estándar a todas las respuestas mediante `SecurityHeadersMiddleware`:
+
+```
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+X-XSS-Protection: 1; mode=block
+Strict-Transport-Security: max-age=31536000; includeSubDomains
+Referrer-Policy: strict-origin-when-cross-origin
+Permissions-Policy: geolocation=(), microphone=(), camera=()
+```
+
+### Logging a archivo rotativo
+
+La API escribe logs en `logs/api.log` con rotación automática (10 MB máx, 5 backups). Formato:
+
+```
+2026-08-20 10:15:00 [INFO] eduia.api: request_id=abc123 method=POST path=/api/evaluate status=200 duration_ms=1203.5
+```
+
+### Agente monitor con Discord
+
+`agent_monitor.py` corre en background al arrancar la API. Lee `logs/api.log` cada 30 segundos, detecta patrones anómalos y genera diagnósticos con Gemini.
+
+**Umbrales de alerta:**
+| Patrón | Umbral |
+|---|---|
+| Errores 500 | ≥ 3 en últimas 50 líneas |
+| Errores 503 (Gemini no disponible) | ≥ 5 |
+| Rate limit 429 | ≥ 10 |
+| Timeouts | ≥ 3 |
+
+**Configuración Discord:**
+
+Agregar en `.streamlit/secrets.toml` o variable de entorno:
+```toml
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/tu_id/tu_token"
+```
+Crear en: Discord → canal → Editar canal → Integraciones → Webhooks
+
+**Endpoint de estado:**
+```bash
+curl http://localhost:8000/api/monitor
+```
+Retorna: estado activo, uptime, disponibilidad de Gemini, últimas 5 alertas.
+
+### Migración `google.genai`
+
+`utils_ai_core.py` fue migrado a la nueva librería oficial `google.genai` (elimina `FutureWarning`). `utils_ai.py` mantiene `google-generativeai` por compatibilidad con los módulos Streamlit.
+
+### Documentación final
+
+- [`docs/final/informe-final.md`](docs/final/informe-final.md) — informe técnico completo
+- [`docs/final/plan-contingencia-demo.md`](docs/final/plan-contingencia-demo.md) — plan de contingencia para la demostración
+- [`docs/Informe Final Proyecto Preespecialización.pdf`](docs/Informe%20Final%20Proyecto%20Preespecialización.pdf) — PDF del informe final
+- [`release-manifest.yml`](release-manifest.yml) — manifiesto del release v1.0.0
+
+---
+
+## 16. Plan de mejora — Semanas 2 a 6
 
 | Semana | Objetivo |
 |---|---|
@@ -542,7 +627,7 @@ Ya incluido en `requirements.txt`.
 | Semana 3 | ✅ Agregar pruebas automatizadas y pipeline CI/CD básico |
 | Semana 4 | ✅ Contenerizar con Docker y preparar despliegue en la nube |
 | Semana 5 | ✅ Observabilidad, instrumentación, pruebas de carga y escalabilidad |
-| Semana 6 | ✅ Migración BD a PostgreSQL/Supabase, diseño responsive móvil, tests BD en CI, release v1.0.0 y defensa técnica |
+| Semana 6 | ✅ Security headers, agente monitor Discord, migración `google.genai`, responsive móvil, tests BD en CI, informe final y defensa técnica |
 
 ---
 
@@ -551,11 +636,12 @@ Ya incluido en `requirements.txt`.
 ```
 Grupo-2-proyecto/
 ├── main.py                    # Punto de entrada Streamlit
-├── api.py                     # API REST FastAPI con observabilidad completa
+├── api.py                     # API REST FastAPI + security headers + agente monitor
+├── agent_monitor.py           # Agente supervisor con diagnóstico Gemini y Discord
 ├── database.py                # BD dual SQLite/PostgreSQL (detección automática)
 ├── database_engagement.py     # BD del sistema de engagement
-├── utils_ai_core.py           # Núcleo de IA: AICache, APIKeyPool, AIManagerCore
-├── utils_ai.py                # Integración con Gemini (Streamlit)
+├── utils_ai_core.py           # Núcleo de IA: AICache, APIKeyPool, AIManagerCore (google.genai)
+├── utils_ai.py                # Integración con Gemini (Streamlit, legacy)
 ├── utils_chat_ai.py           # Chat IA por módulo
 ├── utils_chat.py              # Chat privado entre usuarios
 ├── utils_notifications.py     # Sistema de notificaciones
@@ -564,10 +650,11 @@ Grupo-2-proyecto/
 ├── utils_question_bank.py     # Banco de preguntas
 ├── utils_recommendation.py    # Sistema de recomendaciones
 ├── locustfile.py              # Script de pruebas de carga (Locust)
+├── release-manifest.yml       # Manifiesto del release v1.0.0
 ├── views_admin.py             # Vista del administrador
 ├── views_teacher.py           # Vista del docente
 ├── views_student.py           # Vista del estudiante
-├── styles.py                  # Estilos CSS
+├── styles.py                  # Estilos CSS (responsive móvil/tablet/desktop)
 ├── config.py                  # Configuración general
 ├── ai_course_functions.py     # Cursos de programación personalizados con IA
 ├── engagement_system.py       # Sistema de gamificación principal
@@ -595,6 +682,9 @@ Grupo-2-proyecto/
 ├── data/                      # Datos estáticos
 │   └── question_bank.json
 ├── docs/                      # Documentación técnica y evidencias
+│   ├── final/                 # Entregables finales
+│   │   ├── informe-final.md
+│   │   └── plan-contingencia-demo.md
 │   ├── diagnostico-semana1.md
 │   ├── arquitectura-actual.md
 │   ├── arquitectura-objetivo.md
@@ -602,45 +692,49 @@ Grupo-2-proyecto/
 │   ├── plan-mejora.md
 │   ├── api.md
 │   ├── infra-semana4.md
-│   ├── reporte_estres_20u.html    # Reporte Locust 20 usuarios
-│   ├── reporte_estres_200u.html   # Reporte Locust 200 usuarios
-│   ├── reporte_estres_20u_stats.csv
-│   ├── reporte_estres_200u_stats.csv
+│   ├── registro-errores.md
+│   ├── reporte_estres_20u.html          # Reporte Locust 20 usuarios
+│   ├── reporte_estres_200u.html         # Reporte Locust 200 usuarios
 │   ├── Semana4_Despliegue_Infraestructura_EduIA.pdf
-│   ├── Semana5-Modulo4.pdf        # Entregable Semana 5
-│   └── link proyecto grupo 2.txt
+│   ├── Semana5-Modulo4.pdf
+│   └── Informe Final Proyecto Preespecialización.pdf
+├── logs/                      # Logs rotativos de la API (generado en runtime)
+│   └── api.log
 ├── scripts/                   # Scripts de utilidad y mantenimiento
 │   ├── migrate_to_postgres.py # Migración completa SQLite → PostgreSQL
+│   ├── test_database.py       # Tests de BD (SQLite y PostgreSQL)
 │   ├── add_test_coins.py
 │   ├── clean_chat.py
 │   ├── create_daily_challenges.py
-│   ├── test_database.py
-│   ├── test_tutor_functions.py
-│   └── supabase_sql_to_run.sql
-├── tests/                     # Pruebas automatizadas
+│   └── test_tutor_functions.py
+├── tests/                     # Pruebas automatizadas (111 tests)
 │   ├── test_api_unit.py
 │   ├── test_analizador_sintaxis.py
 │   ├── test_analizador_logica.py
 │   ├── test_api_evidencia.py
 │   ├── test_evaluation_properties.py
-│   └── test_engagement_managers.py  # 38 tests engagement managers
-├── requirements.txt           # Dependencias (incluye psycopg2-binary para PostgreSQL)
+│   └── test_engagement_managers.py
+├── .github/workflows/ci.yml   # Pipeline CI/CD (3 jobs: unit + SQLite + PostgreSQL)
+├── requirements.txt           # Dependencias (google-genai + psycopg2-binary)
 ├── Dockerfile                 # Imagen Docker para despliegue
 ├── .env.example               # Plantilla de variables de entorno
 └── .streamlit/
-    └── secrets.toml           # API keys y DATABASE_URL (NO subir al repo)
+    └── secrets.toml           # API keys, DATABASE_URL, DISCORD_WEBHOOK_URL (NO subir)
 ```
 
 ---
 
-## 16. Release v1.0.0 — Semana 6
+## 17. Release v1.0.0 — Sesión 6
 
 | Elemento | Valor |
 |---|---|
 | **URL pública** | [https://eduiaiugb.streamlit.app/](https://eduiaiugb.streamlit.app/) |
 | **Tag** | `v1.0.0` |
-| **Rama** | `migracion-base-de-datos` |
-| **Commit demostrado** | `4ec811d` |
+| **Rama desplegada** | `migracion-base-de-datos` |
+| **Commit final** | `7ac7349` |
+| **Manifiesto** | [`release-manifest.yml`](release-manifest.yml) |
+| **Informe final** | [`docs/final/informe-final.md`](docs/final/informe-final.md) |
+| **Plan contingencia** | [`docs/final/plan-contingencia-demo.md`](docs/final/plan-contingencia-demo.md) |
 
 ### Rollback
 
