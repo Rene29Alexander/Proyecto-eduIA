@@ -5,8 +5,12 @@ Versión Final: Sistema de Evaluación Inteligente y Preciso
 CORRECCIÓN: Lógica impecable, evaluación justa y detección precisa de errores
 """
 
-import google.generativeai as genai
-from google.generativeai.types import RequestOptions
+import google.generativeai as genai  # librería legacy — usada por funciones Streamlit
+# Nota: utils_ai_core.py ya usa google.genai (nueva librería oficial)
+try:
+    from google.generativeai.types import RequestOptions
+except ImportError:
+    RequestOptions = None
 import re
 import json
 

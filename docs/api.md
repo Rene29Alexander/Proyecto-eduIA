@@ -16,6 +16,11 @@
 | 3 | [POST /api/evaluate](#3-post-apievaluate) | IA — Evaluación de código |
 | 4 | [POST /api/courses/generate](#4-post-apicoursesgenearte) | IA — Generación de cursos |
 | 5 | [POST /api/chat/ask](#5-post-apichatask) | IA — Chat educativo |
+| 6 | [GET /api/stats](#6-get-apistats) | Sistema — Métricas operativas |
+| 7 | [GET /api/monitor](#7-get-apimonitor) | Sistema — Agente supervisor |
+| 3 | [POST /api/evaluate](#3-post-apievaluate) | IA — Evaluación de código |
+| 4 | [POST /api/courses/generate](#4-post-apicoursesgenearte) | IA — Generación de cursos |
+| 5 | [POST /api/chat/ask](#5-post-apichatask) | IA — Chat educativo |
 
 ---
 
@@ -512,3 +517,133 @@ El script prueba los 13 casos documentados (exitosos y de error) e imprime un re
 - La API Key de Gemini **nunca** aparece en el código fuente. Se lee desde la variable de entorno `GEMINI_API_KEY` o desde la base de datos (configuración del admin).
 - Los stacktraces internos se escriben en los logs del servidor pero **no se exponen** al cliente.
 - Todos los campos de texto tienen límite máximo para prevenir abuso.
+
+---
+
+## 6. GET /api/stats
+
+**Descripción:** Retorna métricas operativas internas del servicio en tiempo real: estado del cache de requests, IPs activas en rate limiting, y estado del modelo de IA con su pool de keys.
+
+**Método:** `GET`  **Ruta:** `/api/stats`
+
+**Payload de entrada:** Ninguno.
+
+**Respuesta exitosa — 200 OK**
+```json
+{
+  "request_cache": {
+    "entries": 5,
+    "ttl_seconds": 300
+  },
+  "rate_limiting": {
+    "active_ips": 2,
+    "limit_ai_per_min": 60,
+    "limit_system_per_min": 300
+  },
+  "ai_manager": {
+    "initialized": true,
+    "model": "gemini-2.0-flash",
+    "key_pool": [
+      {
+        "key_preview": "AIza...xyz",
+        "status": "active",
+        "error_count": 0
+      }
+    ]
+  },
+  "timestamp": "2026-08-20T06:44:42.572426"
+}
+```
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `request_cache.entries` | integer | Entradas activas en el cache en memoria |
+| `request_cache.ttl_seconds` | integer | Tiempo de vida de cada entrada (300 = 5 min) |
+| `rate_limiting.active_ips` | integer | IPs con al menos una petición en el último minuto |
+| `rate_limiting.limit_ai_per_min` | integer | Límite de peticiones/min para endpoints de IA |
+| `rate_limiting.limit_system_per_min` | integer | Límite para endpoints de sistema (`/health`, `/metadata`) |
+| `ai_manager.initialized` | boolean | Si el modelo de Gemini está listo |
+| `ai_manager.model` | string \| null | Nombre del modelo activo (`gemini-2.0-flash`, etc.) |
+| `ai_manager.key_pool` | array | Estado de cada API key en el pool de rotación |
+
+---
+
+## 7. GET /api/monitor
+
+**Descripción:** Estado del agente supervisor que corre en background. El agente lee `logs/api.log` cada 30 segundos, detecta anomalías (errores 500/503, timeouts, rate limits) y genera un diagnóstico en lenguaje natural usando Gemini. También envía alertas automáticas al canal de Discord configurado.
+
+**Método:** `GET`  **Ruta:** `/api/monitor`
+
+**Payload de entrada:** Ninguno.
+
+**Respuesta exitosa — 200 OK (sin alertas)**
+```json
+{
+  "monitoring": true,
+  "log_file": "logs/api.log",
+  "check_interval_seconds": 30,
+  "started_at": "2026-08-20T06:20:27.985918",
+  "uptime_seconds": 180,
+  "ai_diagnosis_available": true,
+  "total_alerts": 0,
+  "recent_alerts": []
+}
+```
+
+**Respuesta con alertas activas**
+```json
+{
+  "monitoring": true,
+  "log_file": "logs/api.log",
+  "check_interval_seconds": 30,
+  "started_at": "2026-08-20T06:20:27.985918",
+  "uptime_seconds": 900,
+  "ai_diagnosis_available": true,
+  "total_alerts": 2,
+  "recent_alerts": [
+    {
+      "timestamp": "2026-08-20T06:35:10.123456",
+      "issues": [
+        "4 errores HTTP 500 detectados",
+        "2 timeouts detectados"
+      ],
+      "diagnosis": "Se detectan múltiples errores internos consecutivos que sugieren un fallo en la conexión con Gemini API. Revisar que GEMINI_API_KEY tenga cuota disponible y que el endpoint de generación de cursos no esté recibiendo payloads malformados."
+    }
+  ]
+}
+```
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `monitoring` | boolean | `true` si el agente está activo |
+| `log_file` | string | Ruta del archivo de log monitoreado |
+| `check_interval_seconds` | integer | Cada cuántos segundos revisa los logs (30) |
+| `started_at` | string | Timestamp ISO-8601 de cuando arrancó el agente |
+| `uptime_seconds` | integer | Segundos desde que arrancó |
+| `ai_diagnosis_available` | boolean | `true` si Gemini está configurado para diagnósticos |
+| `total_alerts` | integer | Total de alertas generadas desde el inicio |
+| `recent_alerts` | array | Últimas 5 alertas con timestamp, problemas y diagnóstico IA |
+
+### Umbrales de alerta
+
+| Condición | Umbral | Mensaje generado |
+|---|---|---|
+| Errores HTTP 500 | ≥ 3 en últimas 50 líneas | `"N errores HTTP 500 detectados"` |
+| Errores HTTP 503 | ≥ 5 en últimas 50 líneas | `"N errores HTTP 503 (Gemini no disponible)"` |
+| Rate limit (429) | ≥ 10 en últimas 50 líneas | `"N respuestas 429 (rate limit alcanzado)"` |
+| Timeouts | ≥ 3 en últimas 50 líneas | `"N timeouts detectados"` |
+| Errores internos | ≥ 5 entradas `[ERROR]` | `"N errores internos en logs recientes"` |
+
+### Notificaciones Discord
+
+Si la variable de entorno `DISCORD_WEBHOOK_URL` está configurada, el agente envía:
+- Mensaje de inicio cada vez que la API arranca
+- Alerta con diagnóstico de Gemini cuando se supera cualquier umbral
+
+```bash
+# Configurar en PowerShell
+$env:DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
+
+# O en .env
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+```
