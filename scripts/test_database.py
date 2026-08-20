@@ -56,6 +56,8 @@ try:
     result = init_db()
     check("init_db() sin excepciones", True)
     check("init_db() retorna conexion", result is not None)
+    # Refrescar conn después de init_db (importante en PostgreSQL)
+    conn = db_manager.get_connection()
 except Exception as e:
     check("init_db()", False, str(e))
 
