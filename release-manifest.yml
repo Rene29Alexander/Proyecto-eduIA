@@ -1,0 +1,107 @@
+# =============================================================
+# EduIA — Release Manifest v1.0.0
+# Evaluación Final Módulo 4 — Preespecialización UGB
+# =============================================================
+
+release:
+  version: "1.0.0"
+  name: "EduIA v1.0.0 — Release Final Módulo 4"
+  fecha: "2026-08-19"
+  commit: "8a05d00"
+  rama_principal: "main"
+  rama_despliegue: "migracion-base-de-datos"
+  url_publica: "https://eduiaiugb.streamlit.app/"
+  repositorio: "https://github.com/Rene29Alexander/Proyecto-eduIA"
+
+equipo:
+  - nombre: "Jonathan Roberto Acosta Lopez"
+    usuario_github: "Jonathan099321"
+  - nombre: "Rene Alexander Araujo Soto"
+    usuario_github: "Rene29Alexander"
+  - nombre: "Mario Alexander Hernández Quevedo"
+    usuario_github: "marioquevedo"
+
+codigo:
+  lenguaje: "Python 3.11"
+  framework_frontend: "Streamlit >= 1.28.0"
+  framework_api: "FastAPI >= 0.111.0"
+  servidor: "Uvicorn >= 0.29.0"
+  base_de_datos: "SQLite (local) / PostgreSQL (producción via Supabase)"
+
+modelo_ia:
+  proveedor: "Google AI Studio"
+  modelo_principal: "gemini-2.0-flash"
+  modelo_fallback_1: "gemini-1.5-flash"
+  modelo_fallback_2: "gemini-1.5-flash-8b"
+  libreria: "google-generativeai >= 0.3.0"
+  tecnica: "Prompting con contexto dinámico (RAG simplificado)"
+  cache: "AICache — cache persistente en disco con TTL 24h"
+  pool_keys: "APIKeyPool — rotación automática de hasta 5 API keys"
+
+api:
+  endpoints:
+    - ruta: "GET /health"
+      descripcion: "Estado del servicio y base de datos"
+    - ruta: "GET /metadata"
+      descripcion: "Versión, tecnologías y capacidades"
+    - ruta: "POST /api/evaluate"
+      descripcion: "Evaluación inteligente de código con Gemini"
+    - ruta: "POST /api/courses/generate"
+      descripcion: "Generación de curso personalizado con IA"
+    - ruta: "POST /api/chat/ask"
+      descripcion: "Chat educativo contextualizado por material del módulo"
+  documentacion: "https://eduiaiugb.streamlit.app/ (Swagger en /docs cuando API corre localmente)"
+
+pruebas:
+  framework: "pytest >= 7.0.0"
+  total_tests: 103
+  archivos:
+    - tests/test_api_unit.py
+    - tests/test_analizador_sintaxis.py
+    - tests/test_analizador_logica.py
+    - tests/test_sistema_evaluacion.py
+    - tests/test_engagement_managers.py
+  pruebas_carga: "Locust — locustfile.py"
+  escenarios_locust: 5
+  usuarios_probados: [20, 200]
+  reportes: "docs/reporte_estres_20u.html, docs/reporte_estres_200u.html"
+
+ci_cd:
+  plataforma: "GitHub Actions"
+  archivo: ".github/workflows/ci.yml"
+  triggers: ["push a main", "pull_request a main"]
+  pasos: ["checkout", "Python 3.11", "pip install", "pytest"]
+
+despliegue:
+  plataforma_produccion: "Streamlit Cloud"
+  url: "https://eduiaiugb.streamlit.app/"
+  rama_despliegue: "migracion-base-de-datos"
+  contenedor_local: "Docker — eduia-api:1.0"
+  dockerfile: "Dockerfile"
+  imagen_base: "python:3.11-slim"
+  puerto: 8000
+
+variables_entorno:
+  requeridas:
+    - nombre: "GEMINI_API_KEY"
+      descripcion: "Clave de Google AI Studio"
+      expuesta: false
+  opcionales:
+    - nombre: "TESTING"
+      descripcion: "Activa modo test sin Gemini real"
+    - nombre: "DEBUG"
+      descripcion: "Modo debug"
+  referencia: ".env.example"
+
+limitaciones_conocidas:
+  - "SQLite no soporta múltiples instancias simultáneas en producción"
+  - "google-generativeai deprecado — pendiente migrar a google.genai"
+  - "Sin autenticación por tokens (solo sesión en memoria de Streamlit)"
+  - "Sin HTTPS propio en contenedor local (requiere reverse proxy)"
+  - "Dependencia de disponibilidad de Google Gemini API"
+
+rollback:
+  procedimiento: "git checkout main && git reset --hard <commit-estable>"
+  commit_estable: "8a05d00"
+  rama_estable: "main"
+  tiempo_estimado: "< 5 minutos"

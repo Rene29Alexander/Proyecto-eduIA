@@ -4,6 +4,21 @@
 
 ---
 
+## 🌐 Producto público
+
+| | |
+|---|---|
+| **URL pública** | https://eduiaiugb.streamlit.app/ |
+| **Repositorio** | https://github.com/Rene29Alexander/Proyecto-eduIA |
+| **Versión** | v1.0.0 |
+| **Release** | [v1.0.0](https://github.com/Rene29Alexander/Proyecto-eduIA/releases/tag/v1.0.0) |
+| **Commit** | `a8be18f` |
+| **Pipeline CI/CD** | [![CI](https://github.com/Rene29Alexander/Proyecto-eduIA/actions/workflows/ci.yml/badge.svg)](https://github.com/Rene29Alexander/Proyecto-eduIA/actions) |
+| **Informe final** | [docs/final/informe-final.md](docs/final/informe-final.md) |
+| **Credenciales demo** | Usuario: `admin` / Contraseña: `admin123` |
+
+---
+
 ##  Integrantes del grupo
 
 - Rene Alexander Araujo Soto
