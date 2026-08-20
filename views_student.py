@@ -175,7 +175,7 @@ def _get_pending_tasks_data(_conn_id, username):
         AND ex.is_published = 1
         AND ex.id NOT IN (
             SELECT exam_id FROM exam_attempts
-            WHERE student_id = ? AND status IN ('completed', 'graded')
+            WHERE student_id = ?
         )
         AND (ex.end_date IS NULL OR ex.end_date >= datetime('now'))
         ORDER BY ex.start_date ASC
@@ -296,7 +296,7 @@ def render_pending_tasks_panel(conn, user):
     </div>
     """, unsafe_allow_html=True)
     
-    # Obtener tareas calificadas en los últimos 7 días (exactamente, se quitan después)
+    # Obtener tareas calificadas en los últimos 30 días
     recent_graded = conn.execute("""
         SELECT s.id, s.final_grade as score, s.graded_date as graded_at, s.teacher_feedback as feedback,
                t.title as task_title, t.points as max_points,
@@ -306,14 +306,15 @@ def render_pending_tasks_panel(conn, user):
         JOIN courses c ON t.course_id = c.id
         WHERE s.student_id = ?
         AND s.graded_date IS NOT NULL
-        AND s.graded_date >= datetime('now', '-7 days')
+        AND s.graded_date >= datetime('now', '-30 days')
         ORDER BY s.graded_date DESC
         LIMIT 5
     """, (user['username'],)).fetchall()
     
-    # Obtener exámenes calificados en los últimos 7 días (exactamente, se quitan después)
+    # Obtener exámenes calificados en los últimos 30 días
+    # Filtra por graded_at (cuando el docente calificó/actualizó) o end_time
     recent_exams = conn.execute("""
-        SELECT ea.id, ea.score, ea.end_time as completed_at,
+        SELECT ea.id, ea.score, ea.graded_at as completed_at,
                ex.title as exam_title, ea.max_score as max_points,
                c.name as course_name, c.code as course_code
         FROM exam_attempts ea
@@ -321,9 +322,12 @@ def render_pending_tasks_panel(conn, user):
         JOIN courses c ON ex.course_id = c.id
         WHERE ea.student_id = ?
         AND ea.score IS NOT NULL
-        AND ea.end_time IS NOT NULL
-        AND ea.end_time >= datetime('now', '-7 days')
-        ORDER BY ea.end_time DESC
+        AND ea.status IN ('completed', 'graded')
+        AND (
+            ea.graded_at >= datetime('now', '-30 days')
+            OR ea.end_time >= datetime('now', '-30 days')
+        )
+        ORDER BY COALESCE(ea.graded_at, ea.end_time) DESC
         LIMIT 5
     """, (user['username'],)).fetchall()
     
