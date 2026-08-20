@@ -5686,32 +5686,47 @@ def extract_text_from_pdf(file_bytes):
 
 def display_pdf(file_bytes):
     """
-    Muestra un PDF en la interfaz de Streamlit.
-    Usa <embed> dentro de st.components.v1.html para evitar que
-    navegadores como Brave bloqueen el iframe con data: URL.
+    Muestra el contenido de un PDF.
+    - Si pdf2image está disponible: renderiza páginas como imágenes (sin bloqueos de navegador)
+    - Si no: extrae el texto con pypdf y lo muestra + ofrece descarga
     """
     if not file_bytes:
         return
     try:
-        import streamlit.components.v1 as components
-        b64 = base64.b64encode(file_bytes).decode('utf-8')
-        pdf_html = f"""
-        <style>
-            body {{ margin: 0; padding: 0; background: #1e1e1e; }}
-            embed {{ border: none; border-radius: 4px; }}
-        </style>
-        <embed
-            src="data:application/pdf;base64,{b64}"
-            type="application/pdf"
-            width="100%"
-            height="590px"
-        />
-        """
-        components.html(pdf_html, height=600, scrolling=False)
-    except Exception:
-        # Fallback: botón de descarga si el visor falla
         import io
-        st.info("⚠️ No se pudo mostrar el PDF en el navegador. Usa el botón de descarga.")
+        from pypdf import PdfReader
+
+        # Intentar renderizar con pdf2image (requiere poppler)
+        try:
+            from pdf2image import convert_from_bytes
+            images = convert_from_bytes(file_bytes, dpi=150)
+            st.markdown(f"**📄 PDF — {len(images)} página(s)**")
+            for i, img in enumerate(images):
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                st.image(buf.getvalue(), caption=f"Página {i+1}", use_container_width=True)
+            return
+        except (ImportError, Exception):
+            pass
+
+        # Fallback: extraer texto con pypdf y mostrarlo
+        reader = PdfReader(io.BytesIO(file_bytes))
+        num_pages = len(reader.pages)
+
+        st.markdown(f"**📄 PDF — {num_pages} página(s)**")
+        st.caption("Vista de texto extraído. Descarga el archivo para ver el PDF original con formato.")
+
+        for i, page in enumerate(reader.pages):
+            text = page.extract_text() or ""
+            if text.strip():
+                with st.expander(f"Página {i + 1}", expanded=(i == 0)):
+                    st.text(text)
+            else:
+                with st.expander(f"Página {i + 1} (sin texto extraíble)", expanded=False):
+                    st.caption("Esta página contiene imágenes o contenido no extraíble como texto.")
+
+    except Exception as e:
+        st.warning(f"⚠️ No se pudo procesar el PDF. Usa el botón de descarga. ({e})")
 
 # Instancia global
 ai_manager = AIManager()
