@@ -16,6 +16,25 @@ from datetime import date, timedelta
 # Helpers para construir mocks de conexión SQLite
 # ---------------------------------------------------------------------------
 
+def make_row(*values, columns=None):
+    """Crea una fila mock que soporta acceso por índice Y por nombre de columna."""
+    class DictRow(tuple):
+        def __getitem__(self, key):
+            if isinstance(key, str) and columns:
+                return tuple.__getitem__(self, columns.index(key))
+            return tuple.__getitem__(self, key)
+        def __contains__(self, key):
+            if isinstance(key, str) and columns:
+                return key in columns
+            return tuple.__contains__(self, key)
+        def get(self, key, default=None):
+            try:
+                return self[key]
+            except (ValueError, IndexError):
+                return default
+    return DictRow(values)
+
+
 def make_cursor(*fetchone_values, fetchall_value=None):
     """Crea un cursor mock con respuestas configuradas."""
     cursor = MagicMock()
@@ -118,7 +137,9 @@ class TestPointsManagerConBD:
         from engagement.points_manager import PointsManager
 
         # Simula: total=200, level=2, exp=50, pts_to_next=150, weekly=20, monthly=100, rank=3
-        row = (200, 2, 50, 150, 20, 100, 3)
+        row = make_row(200, 2, 50, 150, 20, 100, 3,
+                       columns=['total_points','level','experience_points',
+                                 'points_to_next_level','weekly_points','monthly_points','rank_position'])
         cursor = make_cursor(row)
         conn = make_conn(cursor)
 
@@ -263,7 +284,8 @@ class TestStreakManagerConBD:
         # Usamos la misma fecha que _today() usa internamente (UTC)
         today_utc = date.today()
         today_str = today_utc.isoformat()
-        row = (5, 10, today_str, 0, 30)
+        _cols = ['current_streak','longest_streak','last_activity_date','freeze_count','total_days_active']
+        row = make_row(5, 10, today_str, 0, 30, columns=_cols)
 
         cursor = MagicMock()
         cursor.execute.return_value = cursor
@@ -288,7 +310,8 @@ class TestStreakManagerConBD:
         from engagement.streak_manager import StreakManager
 
         hace_dos_dias = (date.today() - timedelta(days=2)).isoformat()
-        row = (7, 7, hace_dos_dias, 0, 20)
+        _cols = ['current_streak','longest_streak','last_activity_date','freeze_count','total_days_active']
+        row = make_row(7, 7, hace_dos_dias, 0, 20, columns=_cols)
         cursor = make_cursor(row, row, row)
         conn = make_conn(cursor)
 
@@ -329,7 +352,8 @@ class TestStreakManagerConBD:
         """No se resetea si la racha ya es 0."""
         from engagement.streak_manager import StreakManager
 
-        row = (0, 0, None, 0, 0)  # current_streak = 0
+        _cols = ['current_streak','longest_streak','last_activity_date','freeze_count','total_days_active']
+        row = make_row(0, 0, None, 0, 0, columns=_cols)
         cursor = make_cursor(row)
         conn = make_conn(cursor)
 
