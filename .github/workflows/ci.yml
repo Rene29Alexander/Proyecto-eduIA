@@ -2,62 +2,60 @@ name: EduIA — CI Pipeline
 
 on:
   push:
-    branches: [ "main", "develop" ]
+    branches: [ "main", "develop", "migracion-base-de-datos" ]
   pull_request:
     branches: [ "main" ]
 
 jobs:
-  test:
-    name: Pruebas automatizadas
+  # ============================================================
+  # JOB 1: Pruebas unitarias (API, evaluador, engagement)
+  # ============================================================
+  unit-tests:
+    name: Pruebas unitarias
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Obtener el código
       - name: Checkout del repositorio
         uses: actions/checkout@v4
 
-      # 2. Configurar Python 3.11
       - name: Configurar Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
 
-      # 3. Instalar solo dependencias necesarias para pruebas (rápido y sin fallos)
-      - name: Instalar dependencias de prueba
+      - name: Instalar dependencias
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-test.txt
+          pip install fastapi httpx pydantic uvicorn pytest pytest-mock \
+                      google-generativeai bcrypt psycopg2-binary
 
-      # 4. Verificar sintaxis de api.py
       - name: Verificar sintaxis de api.py
         run: |
           python -c "import ast; ast.parse(open('api.py').read()); print('OK — api.py sin errores de sintaxis')"
 
-      # 5. Pruebas unitarias de la API (sin servidor, sin API Key real)
-      - name: Pruebas unitarias de la API
+      - name: Pruebas unitarias — API
         env:
           GEMINI_API_KEY: "test-key-ci"
           TESTING: "true"
-        run: |
-          python -m pytest tests/test_api_unit.py -v --tb=short
+        run: python -m pytest tests/test_api_unit.py -v --tb=short
 
-      # 6. Pruebas del analizador de sintaxis
-      - name: Pruebas del analizador de sintaxis
+      - name: Pruebas unitarias — Analizador de sintaxis
         env:
           TESTING: "true"
-        run: |
-          python -m pytest tests/test_analizador_sintaxis.py -v --tb=short
+        run: python -m pytest tests/test_analizador_sintaxis.py -v --tb=short
 
-      # 7. Pruebas del analizador de lógica
-      - name: Pruebas del analizador de lógica
+      - name: Pruebas unitarias — Analizador de lógica
         env:
           TESTING: "true"
-        run: |
-          python -m pytest tests/test_analizador_logica.py -v --tb=short
+        run: python -m pytest tests/test_analizador_logica.py -v --tb=short
 
-      # 8. Resumen final
-      - name: Resumen de todas las pruebas
+      - name: Pruebas unitarias — Engagement managers
+        env:
+          TESTING: "true"
+        run: python -m pytest tests/test_engagement_managers.py -v --tb=short
+
+      - name: Resumen total de pruebas unitarias
         env:
           GEMINI_API_KEY: "test-key-ci"
           TESTING: "true"
@@ -66,4 +64,79 @@ jobs:
             tests/test_api_unit.py \
             tests/test_analizador_sintaxis.py \
             tests/test_analizador_logica.py \
+            tests/test_engagement_managers.py \
             --tb=short -q
+
+  # ============================================================
+  # JOB 2: Pruebas de base de datos — SQLite (siempre corre)
+  # ============================================================
+  db-tests-sqlite:
+    name: Pruebas BD — SQLite
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install bcrypt psycopg2-binary
+
+      - name: Pruebas de BD con SQLite
+        env:
+          TESTING: "true"
+        run: |
+          echo "▶ Ejecutando tests de base de datos en modo SQLite"
+          python scripts/test_database.py
+
+  # ============================================================
+  # JOB 3: Pruebas de base de datos — PostgreSQL (solo si SECRET está configurado)
+  # ============================================================
+  db-tests-postgres:
+    name: Pruebas BD — PostgreSQL
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: eduia
+          POSTGRES_PASSWORD: eduia_test
+          POSTGRES_DB: eduia_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install bcrypt psycopg2-binary
+
+      - name: Pruebas de BD con PostgreSQL local (CI)
+        env:
+          DATABASE_URL: "postgresql://eduia:eduia_test@localhost:5432/eduia_test"
+          TESTING: "true"
+        run: |
+          echo "▶ Ejecutando tests de base de datos en modo PostgreSQL"
+          python scripts/test_database.py

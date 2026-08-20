@@ -119,7 +119,8 @@ print("\n── log_activity ──")
 try:
     db_manager.log_activity('admin', 'test_db_script', 'script', '1', {'test': True})
     log = conn.execute(
-        "SELECT * FROM activity_logs WHERE action='test_db_script'"
+        "SELECT * FROM activity_logs WHERE action={}".format('%s' if IS_PG else '?'),
+        ('test_db_script',)
     ).fetchone()
     check("log_activity inserta registro", log is not None)
 except Exception as e:
@@ -157,13 +158,18 @@ try:
         )
     conn.commit()
     user = conn.execute(
-        "SELECT username, role FROM users WHERE username=?",
+        "SELECT username, role FROM users WHERE username={}".format(
+            '%s' if IS_PG else '?'
+        ),
         ('test_user_db_script',)
     ).fetchone()
     user_dict = dict(user) if user else None
     check("INSERT usuario de prueba", user_dict is not None)
     check("SELECT usuario de prueba", user_dict and user_dict.get('role') == 'student')
-    conn.execute("DELETE FROM users WHERE username=?", ('test_user_db_script',))
+    conn.execute(
+        "DELETE FROM users WHERE username={}".format('%s' if IS_PG else '?'),
+        ('test_user_db_script',)
+    )
     conn.commit()
     check("DELETE usuario de prueba", True)
 except Exception as e:
