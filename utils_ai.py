@@ -5686,47 +5686,54 @@ def extract_text_from_pdf(file_bytes):
 
 def display_pdf(file_bytes):
     """
-    Muestra el contenido de un PDF.
-    - Si pdf2image está disponible: renderiza páginas como imágenes (sin bloqueos de navegador)
-    - Si no: extrae el texto con pypdf y lo muestra + ofrece descarga
+    Muestra un PDF página por página como imágenes de alta calidad.
+    Usa PyMuPDF (fitz) para renderizar sin depender de poppler.
+    Compatible con Brave y todos los navegadores (no usa iframe/data URL).
     """
     if not file_bytes:
         return
     try:
         import io
+        import fitz  # PyMuPDF
+
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        num_pages = doc.page_count
+        st.markdown(f"**📄 PDF — {num_pages} página(s)**")
+
+        for i in range(num_pages):
+            page = doc[i]
+            # Renderizar a 2x para buena resolución
+            mat = fitz.Matrix(2.0, 2.0)
+            pix = page.get_pixmap(matrix=mat)
+            img_bytes = pix.tobytes("png")
+            st.image(img_bytes, caption=f"Página {i + 1} de {num_pages}",
+                     use_container_width=True)
+
+        doc.close()
+
+    except ImportError:
+        # PyMuPDF no disponible — fallback a texto con pypdf
+        _display_pdf_text_fallback(file_bytes)
+    except Exception as e:
+        st.warning(f"⚠️ No se pudo renderizar el PDF. ({e})")
+        _display_pdf_text_fallback(file_bytes)
+
+
+def _display_pdf_text_fallback(file_bytes):
+    """Extrae texto del PDF como último recurso cuando no hay renderizador visual."""
+    try:
+        import io
         from pypdf import PdfReader
-
-        # Intentar renderizar con pdf2image (requiere poppler)
-        try:
-            from pdf2image import convert_from_bytes
-            images = convert_from_bytes(file_bytes, dpi=150)
-            st.markdown(f"**📄 PDF — {len(images)} página(s)**")
-            for i, img in enumerate(images):
-                buf = io.BytesIO()
-                img.save(buf, format="PNG")
-                st.image(buf.getvalue(), caption=f"Página {i+1}", use_container_width=True)
-            return
-        except (ImportError, Exception):
-            pass
-
-        # Fallback: extraer texto con pypdf y mostrarlo
         reader = PdfReader(io.BytesIO(file_bytes))
         num_pages = len(reader.pages)
-
-        st.markdown(f"**📄 PDF — {num_pages} página(s)**")
-        st.caption("Vista de texto extraído. Descarga el archivo para ver el PDF original con formato.")
-
+        st.caption(f"📄 {num_pages} página(s) — vista de texto. Descarga el archivo para ver el PDF con formato.")
         for i, page in enumerate(reader.pages):
             text = page.extract_text() or ""
             if text.strip():
                 with st.expander(f"Página {i + 1}", expanded=(i == 0)):
                     st.text(text)
-            else:
-                with st.expander(f"Página {i + 1} (sin texto extraíble)", expanded=False):
-                    st.caption("Esta página contiene imágenes o contenido no extraíble como texto.")
-
-    except Exception as e:
-        st.warning(f"⚠️ No se pudo procesar el PDF. Usa el botón de descarga. ({e})")
+    except Exception:
+        st.info("⚠️ No se pudo mostrar el PDF. Usa el botón ⬇️ para descargarlo.")
 
 # Instancia global
 ai_manager = AIManager()
