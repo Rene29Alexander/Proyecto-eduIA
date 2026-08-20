@@ -12,8 +12,11 @@ gatherUsageStats = false
 maxUploadSize = 50
 enableCORS = false
 enableXsrfProtection = true
-address = "localhost"
-port = 8501
 
 [runner]
 magicEnabled = false
+
+[client]
+# Reducir animación del spinner para que la recarga se sienta más rápida
+showErrorDetails = true
+toolbarMode = "minimal"

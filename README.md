@@ -56,7 +56,7 @@ La IA participa en tres momentos clave:
 | Elemento | Detalle |
 |---|---|
 | Tipo | IA Generativa — Large Language Model (LLM) |
-| Modelos soportados | `gemini-2.0-flash`, `gemini-1.5-flash`, `gemini-1.5-flash-8b`, `gemini-1.5-pro` |
+| Modelos soportados | `gemini-3.1-flash-lite-preview`, `gemini-2.5-flash-lite`, `gemini-3-flash`, `gemini-2.5-flash`, `gemini-2.0-flash`, `gemma-4-26b-a4b-it`, `gemma-3-27b-it` (y más, con fallback automático) |
 | Servicio | Google AI Studio API (`google-generativeai`) |
 | Técnica | Prompting con contexto dinámico (RAG simplificado) |
 | Pool de keys | Hasta 5 API keys con rotación automática por cuota |
@@ -108,13 +108,26 @@ Crear el archivo `.streamlit/secrets.toml` con el siguiente contenido:
 GEMINI_API_KEY = "tu_api_key_aqui"
 ```
 
+Para usar PostgreSQL en producción (Supabase), agregar también:
+
+```toml
+GEMINI_API_KEY = "tu_api_key_aqui"
+DATABASE_URL   = "postgresql://postgres:tu_password@db.xxxx.supabase.co:5432/postgres"
+```
+
+> Si `DATABASE_URL` no está definida, la app usa SQLite local automáticamente. No es necesario cambiarlo para desarrollo.
+
 Para el pool de API keys (rotación automática cuando se agota la cuota):
 
 ```toml
 GEMINI_API_KEY   = "tu_api_key_principal"
 GEMINI_API_KEY_2 = "tu_api_key_alternativa_2"
 GEMINI_API_KEY_3 = "tu_api_key_alternativa_3"
+GEMINI_API_KEY_4 = "tu_api_key_alternativa_4"
+GEMINI_API_KEY_5 = "tu_api_key_alternativa_5"
 ```
+
+> Las keys también se pueden configurar directamente desde el panel de administración (Configuración del Sistema > Pool de API Keys), sin necesidad de editar archivos manualmente.
 
 > No subir este archivo a repositorios públicos. Ver `.env.example` para referencia completa.
 
@@ -132,7 +145,7 @@ GEMINI_API_KEY_3 = "tu_api_key_alternativa_3"
 - Depende de internet y disponibilidad de la API de Gemini
 - La generación de exámenes no siempre produce el número exacto de preguntas solicitadas
 - Sin versión móvil optimizada (diseñada para escritorio)
-- La base de datos es local (SQLite), no soporta múltiples instancias simultáneas
+- En modo SQLite (desarrollo local), no soporta múltiples instancias simultáneas — usar PostgreSQL para producción
 - Sin sistema de autenticación por roles con tokens seguros (solo sesión en memoria)
 
 ---
@@ -399,7 +412,113 @@ locust -f locustfile.py --tags validation   # solo casos 422
 
 ---
 
-## 14. Plan de mejora — Semanas 2 a 6
+## 14. Migración de base de datos — SQLite → PostgreSQL (Supabase)
+
+### Descripción
+
+`database.py` soporta dos motores de forma transparente:
+
+| Variable `DATABASE_URL` | Motor usado | Cuándo |
+|---|---|---|
+| No definida | **SQLite** (`learning_platform.db`) | Desarrollo local |
+| Definida | **PostgreSQL** (Supabase) | Producción / nube |
+
+Ningún otro archivo del proyecto necesita cambios — la detección es automática al arrancar.
+
+### Helpers de compatibilidad
+
+`database.py` expone dos funciones utilitarias para trabajar con fechas sin importar el motor:
+
+```python
+from database import parse_dt, fmt_date
+
+# Convierte timestamp de BD a datetime (SQLite devuelve string, PostgreSQL devuelve datetime)
+dt = parse_dt(row['created_at'])
+
+# Formatea a string de forma segura
+label = fmt_date(row['sent_at'], '%d/%m/%Y')
+```
+
+### Configurar PostgreSQL (Supabase)
+
+1. Crear un proyecto en [supabase.com](https://supabase.com) (plan gratuito disponible)
+2. Ir a **Settings → Database → Connection string → URI**
+3. Copiar la URL y agregarla al archivo `.streamlit/secrets.toml`:
+
+```toml
+GEMINI_API_KEY = "tu_api_key"
+DATABASE_URL   = "postgresql://postgres:[PASSWORD]@db.xxxx.supabase.co:5432/postgres"
+```
+
+O como variable de entorno:
+
+```bash
+# Windows PowerShell
+$env:DATABASE_URL="postgresql://postgres:[PASSWORD]@db.xxxx.supabase.co:5432/postgres"
+
+# Linux / Mac
+export DATABASE_URL="postgresql://postgres:[PASSWORD]@db.xxxx.supabase.co:5432/postgres"
+```
+
+### Migrar datos de SQLite a PostgreSQL
+
+Si ya tienes datos en SQLite y quieres moverlos a PostgreSQL:
+
+```bash
+# 1. Asegúrate de tener DATABASE_URL configurada
+# 2. Ejecutar el script de migración
+python scripts/migrate_to_postgres.py
+```
+
+El script:
+- Crea el schema completo en PostgreSQL automáticamente (`init_db`)
+- Respeta el orden correcto de foreign keys (~50 tablas)
+- Convierte tipos de datos incompatibles (BLOB → BYTEA, etc.)
+- Inyecta valores por defecto en columnas NOT NULL vacías
+- Muestra progreso detallado por tabla y resumen final
+- Es seguro de correr múltiples veces (`ON CONFLICT DO NOTHING`)
+
+Ejemplo de salida:
+
+```
+============================================================
+  MIGRACIÓN SQLite → PostgreSQL
+============================================================
+  Origen : learning_platform.db (1,240 KB)
+  Destino: postgresql://postgres:***@db.xxxx.supabase.co...
+============================================================
+
+📦 Conectando a SQLite...
+   47 tablas encontradas en SQLite
+🐘 Conectando a PostgreSQL...
+   Conexión exitosa
+🏗  Creando schema en PostgreSQL (init_db)...
+   Schema creado correctamente
+🔄 Migrando 47 tablas...
+
+  ✅ users: 15 filas
+  ✅ courses: 8 filas
+  ✅ modules: 24 filas
+  ...
+
+============================================================
+  RESUMEN DE MIGRACIÓN
+  ✅ Filas migradas exitosamente: 1,843
+  ⚠  Filas omitidas (conflictos): 0
+============================================================
+```
+
+### Dependencias adicionales para PostgreSQL
+
+```bash
+pip install psycopg2-binary>=2.9.9
+```
+
+Ya incluido en `requirements.txt`.
+
+---
+
+## 15. Plan de mejora — Semanas 2 a 6
 
 | Semana | Objetivo |
 |---|---|
@@ -407,24 +526,20 @@ locust -f locustfile.py --tags validation   # solo casos 422
 | Semana 3 | ✅ Agregar pruebas automatizadas y pipeline CI/CD básico |
 | Semana 4 | ✅ Contenerizar con Docker y preparar despliegue en la nube |
 | Semana 5 | ✅ Observabilidad, instrumentación, pruebas de carga y escalabilidad |
-| Semana 6 | Revisar seguridad, documentación final y defensa técnica |
+| Semana 6 | 🔄 Migración de BD a PostgreSQL/Supabase, seguridad, documentación final y defensa técnica |
 
 ---
 
 ##  Estructura del proyecto
 
 ```
-proyectof/
-├── main.py                    # Punto de entrada
+Grupo-2-proyecto/
+├── main.py                    # Punto de entrada Streamlit
 ├── api.py                     # API REST FastAPI con observabilidad completa
-├── utils_ai_core.py           # Núcleo de IA: AICache, APIKeyPool, AIManagerCore
-├── locustfile.py              # Script de pruebas de carga (Locust)
-├── views_admin.py             # Vista del administrador
-├── views_teacher.py           # Vista del docente
-├── views_student.py           # Vista del estudiante
-├── database.py                # Inicialización y manejo de BD
+├── database.py                # BD dual SQLite/PostgreSQL (detección automática)
 ├── database_engagement.py     # BD del sistema de engagement
-├── utils_ai.py                # Integración con Gemini
+├── utils_ai_core.py           # Núcleo de IA: AICache, APIKeyPool, AIManagerCore
+├── utils_ai.py                # Integración con Gemini (Streamlit)
 ├── utils_chat_ai.py           # Chat IA por módulo
 ├── utils_chat.py              # Chat privado entre usuarios
 ├── utils_notifications.py     # Sistema de notificaciones
@@ -432,6 +547,10 @@ proyectof/
 ├── utils_performance.py       # Optimizaciones de rendimiento
 ├── utils_question_bank.py     # Banco de preguntas
 ├── utils_recommendation.py    # Sistema de recomendaciones
+├── locustfile.py              # Script de pruebas de carga (Locust)
+├── views_admin.py             # Vista del administrador
+├── views_teacher.py           # Vista del docente
+├── views_student.py           # Vista del estudiante
 ├── styles.py                  # Estilos CSS
 ├── config.py                  # Configuración general
 ├── ai_course_functions.py     # Cursos de programación personalizados con IA
@@ -470,6 +589,13 @@ proyectof/
 │   ├── reporte_estres_200u.html   # Reporte Locust 200 usuarios
 │   └── Semana5-Modulo4.pdf        # Entregable Semana 5
 ├── scripts/                   # Scripts de utilidad y mantenimiento
+│   ├── migrate_to_postgres.py # Migración completa SQLite → PostgreSQL
+│   ├── add_test_coins.py
+│   ├── clean_chat.py
+│   ├── create_daily_challenges.py
+│   ├── test_database.py
+│   ├── test_tutor_functions.py
+│   └── supabase_sql_to_run.sql
 ├── tests/                     # Pruebas automatizadas
 │   ├── test_api_unit.py
 │   ├── test_analizador_sintaxis.py
@@ -477,10 +603,11 @@ proyectof/
 │   ├── test_api_evidencia.py
 │   ├── test_evaluation_properties.py
 │   └── test_engagement_managers.py  # 38 tests engagement managers
-├── requirements.txt
+├── requirements.txt           # Dependencias (incluye psycopg2-binary para PostgreSQL)
+├── Dockerfile                 # Imagen Docker para despliegue
 ├── .env.example               # Plantilla de variables de entorno
 └── .streamlit/
-    └── secrets.toml           # API keys (NO subir al repo)
+    └── secrets.toml           # API keys y DATABASE_URL (NO subir al repo)
 ```
 
 ---

@@ -3,7 +3,6 @@ Sistema de notificaciones para la plataforma
 """
 
 import streamlit as st
-import sqlite3
 from datetime import datetime, timedelta
 from database import db_manager
 import json
@@ -31,7 +30,7 @@ class NotificationManager:
             ''', (user_id, title, message, notification_type, link))
             self.conn.commit()
             return True
-        except sqlite3.Error as e:
+        except Exception as e:
             print(f"Error de BD creando notificación: {e}")
             return False
         except Exception as e:

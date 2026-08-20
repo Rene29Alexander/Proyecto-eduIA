@@ -31,25 +31,8 @@ class ShopManager:
     
     @staticmethod
     def _ensure_user_items_table():
-        """Asegura que existe la tabla de items del usuario"""
-        conn = db_manager.get_connection()
-        c = conn.cursor()
-        
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS user_active_items (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id TEXT NOT NULL,
-                item_key TEXT NOT NULL,
-                item_name TEXT NOT NULL,
-                item_type TEXT NOT NULL,
-                activated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                expires_at TIMESTAMP,
-                is_active INTEGER DEFAULT 1,
-                metadata TEXT,
-                FOREIGN KEY (user_id) REFERENCES users(username)
-            )
-        ''')
-        conn.commit()
+        """Tabla creada en database.py init_db — no-op para compatibilidad."""
+        pass
     
     @staticmethod
     def purchase_item(user_id, item_id):
@@ -66,7 +49,13 @@ class ShopManager:
         if not item:
             return False, "Item no encontrado"
         
-        cost_coins, cost_points, stock, item_key, metadata, name, item_type = item
+        cost_coins  = item['cost_coins']
+        cost_points = item['cost_points']
+        stock       = item['stock']
+        item_key    = item['item_key']
+        metadata    = item['metadata']
+        name        = item['name']
+        item_type   = item['item_type']
         
         # Verificar stock
         if stock == 0:

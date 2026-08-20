@@ -7,6 +7,8 @@ import html # Necesario para seguridad
 import streamlit.components.v1 as components
 from datetime import datetime, timedelta
 import pandas as pd
+from database import parse_dt, fmt_date, bytes_to_b64, to_date
+from database import db_manager
 from utils_ai import ai_evaluator, get_socratic_hint, display_pdf, ai_grade_open_question
 from utils_notifications import notification_manager
 from utils_recommendation import get_content_recommendations
@@ -49,9 +51,8 @@ def get_cached_ai_sections(_conn, course_id):
         WHERE ai_course_id = ?
         ORDER BY topic_number
     """, (course_id,))
-    # Devolver como lista de diccionarios para compatibilidad
-    columns = [desc[0] for desc in cursor.description]
-    sections = [dict(zip(columns, row)) for row in cursor.fetchall()]
+    # _Row ya es un dict — usar directamente, no hacer zip(columns, row)
+    sections = [dict(row) for row in cursor.fetchall()]
     
     # Verificar duplicados (debugging)
     topic_numbers = [s['topic_number'] for s in sections]
@@ -90,24 +91,34 @@ def check_database_schema(conn):
             pass
     
     # Agregar campo de estado de visualización para cursos regulares
+    # (estas migraciones ya se manejan en database.py _run_migrations,
+    #  pero se mantiene como fallback para compatibilidad con SQLite local)
     try:
         conn.execute("SELECT display_status FROM enrollments LIMIT 1")
-    except:
+    except Exception:
         try:
+            conn.rollback()
             conn.execute("ALTER TABLE enrollments ADD COLUMN display_status TEXT DEFAULT 'active'")
             conn.commit()
-        except:
-            pass
-    
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+
     # Agregar campo de estado de visualización para cursos IA
     try:
         conn.execute("SELECT display_status FROM ai_courses LIMIT 1")
-    except:
+    except Exception:
         try:
+            conn.rollback()
             conn.execute("ALTER TABLE ai_courses ADD COLUMN display_status TEXT DEFAULT 'active'")
             conn.commit()
-        except:
-            pass
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
 
 def clean_bad_html(text):
     """
@@ -130,11 +141,49 @@ def clean_bad_html(text):
 def render_avatar(avatar_bytes, size=50):
     """Renderiza avatar de usuario"""
     if avatar_bytes:
-        b64 = base64.b64encode(avatar_bytes).decode()
+        b64 = bytes_to_b64(avatar_bytes)
         src = f"data:image/png;base64,{b64}"
     else:
         src = "https://cdn-icons-png.flaticon.com/512/847/847969.png"
     return f'<div style="display:flex; justify-content:center; margin-bottom:5px;"><img src="{src}" style="width:{size}px;height:{size}px;border-radius:50%;border:2px solid #58a6ff;object-fit:cover;"></div>'
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _get_pending_tasks_data(_conn_id, username):
+    """Obtiene tareas y exámenes pendientes con caché de 30 segundos."""
+    conn_ref = db_manager.get_connection()
+    pending_tasks = conn_ref.execute("""
+        SELECT t.id, t.title, t.description, t.due_date, t.points,
+               c.name as course_name, c.code as course_code, c.id as course_id
+        FROM tasks t
+        JOIN courses c ON t.course_id = c.id
+        JOIN enrollments e ON c.id = e.course_id
+        WHERE e.student_id = ?
+        AND t.id NOT IN (SELECT task_id FROM submissions WHERE student_id = ?)
+        AND t.due_date >= date('now')
+        ORDER BY t.due_date ASC
+        LIMIT 10
+    """, (username, username)).fetchall()
+
+    pending_exams = conn_ref.execute("""
+        SELECT ex.id, ex.title, ex.start_date, ex.end_date, ex.duration_minutes,
+               c.name as course_name, c.code as course_code, c.id as course_id,
+               ex.module_id
+        FROM exams ex
+        JOIN courses c ON ex.course_id = c.id
+        JOIN enrollments e ON c.id = e.course_id
+        WHERE e.student_id = ?
+        AND ex.is_published = 1
+        AND ex.id NOT IN (
+            SELECT exam_id FROM exam_attempts
+            WHERE student_id = ? AND status IN ('completed', 'graded')
+        )
+        AND (ex.end_date IS NULL OR ex.end_date >= datetime('now'))
+        ORDER BY ex.start_date ASC
+        LIMIT 5
+    """, (username, username)).fetchall()
+
+    return [dict(t) for t in pending_tasks], [dict(e) for e in pending_exams]
+
 
 def render_pending_tasks_panel(conn, user):
     """Renderiza panel lateral con tareas pendientes y valoraciones recientes"""
@@ -149,49 +198,9 @@ def render_pending_tasks_panel(conn, user):
         <h3 style="color: #58a6ff; margin: 0 0 15px 0; font-size: 1.3em;">📋 Por hacer</h3>
     </div>
     """, unsafe_allow_html=True)
-    
-    # Tareas pendientes: solo las creadas en la última semana O cuya fecha de entrega aún no ha vencido
-    pending_tasks = conn.execute("""
-        SELECT t.id, t.title, t.description, t.due_date, t.points,
-               c.name as course_name, c.code as course_code, c.id as course_id
-        FROM tasks t
-        JOIN courses c ON t.course_id = c.id
-        JOIN enrollments e ON c.id = e.course_id
-        WHERE e.student_id = ? 
-        AND t.id NOT IN (
-            SELECT task_id FROM submissions 
-            WHERE student_id = ?
-        )
-        AND t.due_date >= date('now')
-        AND (
-            t.due_date >= date('now')
-            OR t.created_at >= datetime('now', '-7 days')
-        )
-        ORDER BY t.due_date ASC
-        LIMIT 10
-    """, (user['username'], user['username'])).fetchall()
-    
-    # Exámenes pendientes: solo los de la última semana o que aún no vencen
-    pending_exams = conn.execute("""
-        SELECT ex.id, ex.title, ex.start_date, ex.end_date, ex.duration_minutes,
-               c.name as course_name, c.code as course_code, c.id as course_id,
-               ex.module_id
-        FROM exams ex
-        JOIN courses c ON ex.course_id = c.id
-        JOIN enrollments e ON c.id = e.course_id
-        WHERE e.student_id = ?
-        AND ex.is_published = 1
-        AND ex.id NOT IN (
-            SELECT exam_id FROM exam_attempts 
-            WHERE student_id = ? AND status IN ('completed', 'graded')
-        )
-        AND (ex.end_date IS NULL OR ex.end_date >= datetime('now'))
-        ORDER BY ex.start_date ASC
-        LIMIT 5
-    """, (user['username'], user['username'])).fetchall()
-    
-    tasks = [dict(t) for t in pending_tasks]
-    exams = [dict(e) for e in pending_exams]
+
+    # Usar datos cacheados
+    tasks, exams = _get_pending_tasks_data(id(conn), user['username'])
     
     if not tasks and not exams:
         st.markdown("""
@@ -203,7 +212,7 @@ def render_pending_tasks_panel(conn, user):
         # Mostrar tareas con botón de ir al curso
         for task in tasks:
             try:
-                due_date = datetime.strptime(task['due_date'], '%Y-%m-%d %H:%M:%S') if ' ' in (task['due_date'] or '') else datetime.strptime(task['due_date'], '%Y-%m-%d')
+                due_date = parse_dt(task['due_date']) if ' ' in (task['due_date'] or '') else parse_dt(task['due_date'])
             except Exception:
                 due_date = datetime.now() + timedelta(days=7)
             
@@ -240,7 +249,7 @@ def render_pending_tasks_panel(conn, user):
         # Mostrar exámenes con botón de ir al curso
         for exam in exams:
             try:
-                start_time = datetime.strptime(exam['start_date'], '%Y-%m-%d %H:%M:%S') if exam.get('start_date') else None
+                start_time = parse_dt(exam['start_date']) if exam.get('start_date') else None
                 days_left = (start_time - datetime.now()).days if start_time else 99
                 date_label = start_time.strftime('%d/%m %H:%M') if start_time else "Sin fecha límite"
             except Exception:
@@ -353,7 +362,7 @@ def render_pending_tasks_panel(conn, user):
             
             # Parsear fecha de calificación
             try:
-                graded_date = datetime.strptime(task['graded_at'], '%Y-%m-%d %H:%M:%S')
+                graded_date = parse_dt(task['graded_at'])
                 date_str = graded_date.strftime('%d de %b')
             except:
                 date_str = "Reciente"
@@ -408,7 +417,7 @@ def render_pending_tasks_panel(conn, user):
             
             # Parsear fecha de finalización
             try:
-                completed_date = datetime.strptime(exam['completed_at'], '%Y-%m-%d %H:%M:%S')
+                completed_date = parse_dt(exam['completed_at'])
                 date_str = completed_date.strftime('%d de %b')
             except:
                 date_str = "Reciente"
@@ -796,11 +805,12 @@ def validate_task_submission(conn, task_id, student_id):
         if due_date:
             if isinstance(due_date, str):
                 try:
-                    due_date = datetime.strptime(due_date, '%Y-%m-%d')
+                    due_date = parse_dt(due_date)
                 except:
                     due_date = datetime.now()
             
-            if datetime.now().date() > due_date.date():
+            due_date_cmp = to_date(due_date)
+            if due_date_cmp and datetime.now().date() > due_date_cmp:
                 allow_late = task.get('allow_late_submissions', 1)
                 if allow_late == 0:
                     return False, "⏰ Tiempo de entrega vencido - No se permiten entregas tardías"
@@ -915,16 +925,32 @@ def render_exam_interface(conn, es, u, c, model):
                         "graded": True
                     })
                 elif qtype == 'open_text':
-                    # Guardar respuesta sin calificar (pendiente para el docente)
+                    # Evaluar con IA si está disponible
+                    if model and student_ans and student_ans.strip():
+                        try:
+                            ai_score, ai_fb = ai_grade_open_question(
+                                model, q['question'], student_ans, q['points']
+                            )
+                            total_score += ai_score
+                            graded_by_ai = True
+                        except Exception as _e:
+                            print(f"[Exam AI eval] {_e}")
+                            ai_score, ai_fb = 0, "Pendiente de calificación por el docente"
+                            graded_by_ai = False
+                    else:
+                        ai_score, ai_fb = 0, "Sin respuesta — pendiente de calificación"
+                        graded_by_ai = False
+
                     details_list.append({
                         "q_id": q['id'],
                         "question": q['question'],
                         "type": "open_text",
                         "answer": student_ans if student_ans else "Sin respuesta",
-                        "score": 0,  # Pendiente de calificación
+                        "score": ai_score,
                         "max_points": q['points'],
-                        "ai_feedback": "Pendiente de calificación por el docente",
-                        "graded": False  # Marca como no calificada
+                        "ai_feedback": ai_fb,
+                        "graded": graded_by_ai,
+                        "needs_manual_review": not graded_by_ai
                     })
             
             progress_bar.progress(0.8, text="💾 Guardando resultados...")
@@ -2009,12 +2035,12 @@ Responde SOLO con JSON:
                                         if _existing:
                                             _gym_challenge_id = _existing["id"]
                                         else:
-                                            conn.execute(
+                                            _ins_cursor = conn.execute(
                                                 "INSERT INTO daily_challenges (challenge_date, language, difficulty, title, description, points, bonus_points) VALUES (date('now'), ?, ?, ?, ?, 30, 10)",
                                                 (_gym_lang, _gym_diff, _gym_title, _gym_desc)
                                             )
                                             conn.commit()
-                                            _gym_challenge_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                                            _gym_challenge_id = _ins_cursor.lastrowid
                                         # Registrar intento siempre (no solo si completo)
                                         conn.execute(
                                             "INSERT INTO daily_challenge_attempts (challenge_id, user_id, submitted_code, score, completed, feedback) VALUES (?, ?, ?, ?, ?, ?)",
@@ -2188,7 +2214,7 @@ Responde SOLO con JSON:
                 use_container_width=True)
         _sc_user = u["username"]
         _sc = conn.execute(
-            "SELECT COUNT(*) FROM (SELECT DISTINCT dc.language, dc.title FROM daily_challenge_attempts dca JOIN daily_challenges dc ON dca.challenge_id = dc.id WHERE dca.user_id=?)",
+            "SELECT COUNT(*) FROM (SELECT DISTINCT dc.language, dc.title FROM daily_challenge_attempts dca JOIN daily_challenges dc ON dca.challenge_id = dc.id WHERE dca.user_id=?) AS sub",
             (_sc_user,)
         ).fetchone()[0]
         if _sc > 0:
@@ -2668,7 +2694,7 @@ Responde SOLO con JSON:
         
         # Header del curso
         if c.get('cover_image'):
-            b64_img = base64.b64encode(c['cover_image']).decode()
+            b64_img = bytes_to_b64(c['cover_image'])
             st.markdown(f"""
             <div style="
                 width: 100%;
@@ -3091,7 +3117,7 @@ Responde SOLO con JSON:
                 for post in posts:
                     # Avatar
                     if post.get('avatar'):
-                        b64_av = base64.b64encode(post['avatar']).decode()
+                        b64_av = bytes_to_b64(post['avatar'])
                         img_html = f'<img src="data:image/png;base64,{b64_av}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">'
                     else:
                         img_html = '<img src="https://cdn-icons-png.flaticon.com/512/847/847969.png" style="width:40px;height:40px;border-radius:50%;">'
@@ -3273,7 +3299,7 @@ def render_regular_course_card(course, index):
     
     # Imagen del curso
     if course.get('cover_image'):
-        img_src = f"data:image/png;base64,{base64.b64encode(course['cover_image']).decode()}"
+        img_src = f"data:image/png;base64,{bytes_to_b64(course['cover_image'])}"
     else:
         img_src = "https://images.unsplash.com/photo-1501504905252-473c47e087f8?w=400&h=200&fit=crop"
     
@@ -3388,7 +3414,7 @@ def render_ai_course_card(conn, ai_course, index, user):
             </div>
             <div style="color: #ccc; font-size: 0.8rem;">
                 🎯 Evaluación: {ai_course.get('assessment_score', 0):.1f}%<br>
-                📅 Creado: {ai_course['created_at'][:10]}
+                📅 Creado: {fmt_date(ai_course['created_at'])}
             </div>
         </div>
     </div>
@@ -3440,7 +3466,7 @@ def render_regular_course_card(course, index):
     
     # Imagen del curso
     if course.get('cover_image'):
-        img_src = f"data:image/png;base64,{base64.b64encode(course['cover_image']).decode()}"
+        img_src = f"data:image/png;base64,{bytes_to_b64(course['cover_image'])}"
     else:
         img_src = "https://images.unsplash.com/photo-1501504905252-473c47e087f8?w=400&h=200&fit=crop"
     
@@ -3930,7 +3956,7 @@ def render_regular_course_card(course, index):
         
         # Header del curso
         if c.get('cover_image'):
-            b64_img = base64.b64encode(c['cover_image']).decode()
+            b64_img = bytes_to_b64(c['cover_image'])
             st.markdown(f"""
             <div style="
                 width: 100%;
@@ -4083,11 +4109,12 @@ def render_regular_course_card(course, index):
                                 if due_date:
                                     if isinstance(due_date, str):
                                         try:
-                                            due_date = datetime.strptime(due_date, '%Y-%m-%d')
+                                            due_date = parse_dt(due_date)
                                         except:
                                             due_date = datetime.now()
                                     
-                                    if datetime.now().date() > due_date.date():
+                                    due_date_cmp = to_date(due_date)
+                                    if due_date_cmp and datetime.now().date() > due_date_cmp:
                                         edit_reason = "El plazo de entrega ha vencido"
                                     else:
                                         can_edit = True
@@ -4431,7 +4458,7 @@ def render_regular_course_card(course, index):
                 for post in posts:
                     # Avatar
                     if post.get('avatar'):
-                        b64_av = base64.b64encode(post['avatar']).decode()
+                        b64_av = bytes_to_b64(post['avatar'])
                         img_html = f'<img src="data:image/png;base64,{b64_av}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">'
                     else:
                         img_html = '<img src="https://cdn-icons-png.flaticon.com/512/847/847969.png" style="width:40px;height:40px;border-radius:50%;">'
@@ -4639,7 +4666,7 @@ def render_personal_academy(conn, user, model):
                 with col1:
                     level_emoji = {"principiante": "🌱", "intermedio": "🌿", "avanzado": "🌳"}
                     st.write(f"**{course['language']}** {level_emoji.get(course['level'], '📊')} {course['level'].title()}")
-                    st.caption(f"Creado: {course['created_at'][:10]}")
+                    st.caption(f"Creado: {fmt_date(course['created_at'])}")
                 
                 with col2:
                     progress = course['progress_percentage'] or 0
@@ -4721,7 +4748,8 @@ def render_personal_academy(conn, user, model):
             
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
-                if st.button("🔄 Crear Nuevo Curso", type="primary", use_container_width=True):
+                if st.button("🔄 Crear Nuevo Curso", type="primary", use_container_width=True,
+                             key="btn_crear_nuevo_curso_academy"):
                     # Limpiar estados previos
                     keys_to_delete = [
                         'evaluation_completed', 'evaluation_responses', 'user_responses', 
@@ -4824,12 +4852,15 @@ def render_personal_academy(conn, user, model):
                         with col_lang:
                             st.write(f"**{assessment['language']}**")
                         with col_level:
+                            level_val = assessment.get('level') or ''
                             level_emoji = {"principiante": "🌱", "intermedio": "🌿", "avanzado": "🌳"}
-                            st.write(f"{level_emoji.get(assessment['level'], '📊')} {assessment['level'].title()}")
+                            st.write(f"{level_emoji.get(level_val, '📊')} {level_val.title() if level_val else '—'}")
                         with col_score:
-                            st.write(f"**{assessment['percentage']:.1f}%**")
+                            pct = assessment.get('percentage') or assessment.get('score') or 0
+                            st.write(f"**{float(pct):.1f}%**")
                         with col_date:
-                            date_str = assessment['created_at'][:10]
+                            date_val = assessment.get('created_at') or assessment.get('assessed_at')
+                            date_str = fmt_date(date_val) if date_val else '—'
                             st.write(f"📅 {date_str}")
             else:
                 st.info("👈 Selecciona un lenguaje y realiza tu primera evaluación")
@@ -5089,11 +5120,13 @@ def create_ai_course_from_assessment(conn, user, model, language, responses):
         
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("🔄 Crear Nuevo Curso", type="primary", use_container_width=True):
+            if st.button("🔄 Crear Nuevo Curso", type="primary", use_container_width=True,
+                         key="btn_crear_nuevo_curso_replace"):
                 st.session_state.replace_course_confirmed = True
                 st.rerun()
         with col2:
-            if st.button("❌ Cancelar", use_container_width=True):
+            if st.button("❌ Cancelar", use_container_width=True,
+                         key="btn_cancelar_replace_course"):
                 # Limpiar todo el estado de evaluación
                 for key in ['evaluation_completed', 'evaluation_responses', 'user_responses', 
                            'current_question', 'start_time', 'comprehensive_questions',
@@ -5232,10 +5265,11 @@ def create_ai_course_from_assessment(conn, user, model, language, responses):
             cursor = conn.execute("""
                 INSERT INTO ai_courses 
                 (student_id, language, level, assessment_score, assessment_data, status, 
-                 total_topics, completed_topics, sections_count)
-                VALUES (?, ?, ?, ?, ?, 'active', ?, 0, ?)
+                 total_topics, completed_topics, sections_count, title)
+                VALUES (?, ?, ?, ?, ?, 'active', ?, 0, ?, ?)
             """, (user['username'], language, level, percentage, json.dumps(responses), 
-                  sections_count, sections_count))
+                  sections_count, sections_count,
+                  f"Curso de {language} - {level}"))
             conn.commit()
             ai_course_id = cursor.lastrowid
         
@@ -5508,7 +5542,7 @@ def render_regular_course_simple(conn, user, model):
     with col1:
         # Mostrar imagen del curso o icono por defecto
         if c.get('cover_image'):
-            img_b64 = base64.b64encode(c['cover_image']).decode()
+            img_b64 = bytes_to_b64(c['cover_image'])
             st.markdown(f"""
             <div style="display: flex; justify-content: center; margin-top: 10px;">
                 <img src="data:image/png;base64,{img_b64}" 
@@ -5868,7 +5902,7 @@ def render_user_profile(conn, current_user):
             # Mostrar avatar con marco
             if user.get('avatar'):
                 import base64
-                b64 = base64.b64encode(user['avatar']).decode()
+                b64 = bytes_to_b64(user['avatar'])
                 st.markdown(f'<img src="data:image/png;base64,{b64}" style="width:150px;height:150px;border-radius:50%;{cosmetic_frame if cosmetic_frame else "border:3px solid #4a8fd8"};object-fit:cover">', unsafe_allow_html=True)
             else:
                 st.markdown(f"""
@@ -6422,7 +6456,7 @@ def create_sample_course_data(conn, user):
         
         if existing_courses == 0:
             # Crear un curso de prueba
-            conn.execute("""
+            _cur = conn.execute("""
                 INSERT OR IGNORE INTO courses 
                 (name, code, description, teacher_id, status, created_at)
                 VALUES (?, ?, ?, ?, ?, ?)
@@ -6430,12 +6464,12 @@ def create_sample_course_data(conn, user):
                 "Curso de Prueba - Programación Básica",
                 "PROG101", 
                 "Curso introductorio de programación con conceptos fundamentales",
-                "admin",  # Asumiendo que admin existe
+                "admin",
                 "active",
                 datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             ))
             
-            course_id = conn.lastrowid
+            course_id = _cur.lastrowid
             
             # Inscribir al estudiante
             conn.execute("""
@@ -6497,9 +6531,12 @@ def render_group_chat_interface(conn, module_id, user_id, user_role, module_titl
         cols = st.columns(2)
         for i, q in enumerate(suggested_questions):
             with cols[i % 2]:
-                if st.button(q['question_text'], key=f"grp_suggested_{module_id}_{q['id']}_{user_id}", use_container_width=True):
+                q_text = q.get('question_text') or q.get('question') or ''
+                if not q_text:
+                    continue
+                if st.button(q_text, key=f"grp_suggested_{module_id}_{q['id']}_{user_id}", use_container_width=True):
                     with st.spinner("🤖 La IA está respondiendo..."):
-                        result = chat_manager.send_message(module_id, user_id, user_role, q['question_text'])
+                        result = chat_manager.send_message(module_id, user_id, user_role, q_text)
                     if result['success']:
                         st.rerun()
                     else:
@@ -6619,14 +6656,17 @@ def render_module_chat_interface(conn, module_id, student_id, module_title, mode
         cols = st.columns(2)
         for i, q in enumerate(suggested_questions):
             with cols[i % 2]:
+                q_text = q.get('question_text') or q.get('question') or ''
+                if not q_text:
+                    continue
                 if st.button(
-                    q['question_text'],
+                    q_text,
                     key=f"suggested_{module_id}_{q['id']}",
                     use_container_width=True
                 ):
                     # Enviar la pregunta automáticamente
                     with st.spinner("🤖 La IA está pensando..."):
-                        result = chat_manager.send_message(module_id, student_id, q['question_text'])
+                        result = chat_manager.send_message(module_id, student_id, q_text)
                     
                     if result['success']:
                         st.success("✅ Respuesta recibida")
@@ -7161,7 +7201,7 @@ def render_daily_challenge_page(conn, user, model):
                 help="Genera nuevos retos personalizados con IA",
                 use_container_width=True)
         _sc = conn.execute(
-            "SELECT COUNT(*) FROM (SELECT DISTINCT dc.language, dc.title FROM daily_challenge_attempts dca JOIN daily_challenges dc ON dca.challenge_id = dc.id WHERE dca.user_id=?)",
+            "SELECT COUNT(*) FROM (SELECT DISTINCT dc.language, dc.title FROM daily_challenge_attempts dca JOIN daily_challenges dc ON dca.challenge_id = dc.id WHERE dca.user_id=?) AS sub",
             (user["username"],)
         ).fetchone()[0]
         if _sc > 0:
@@ -7456,7 +7496,7 @@ def render_all_members_card(conn, member: dict, user_id: str, course_id: int):
     
     # Avatar
     if member.get('avatar'):
-        avatar_b64 = base64.b64encode(member['avatar']).decode('utf-8')
+        avatar_b64 = bytes_to_b64(member['avatar'])
         avatar_html = f'<img src="data:image/png;base64,{avatar_b64}" style="width: 48px; height: 48px; border-radius: 50%; object-fit: cover; border: 2px solid #58a6ff;">'
     else:
         initial = member['first_name'][0].upper() if member['first_name'] else 'U'
@@ -7528,7 +7568,7 @@ def render_contact_card(conn, contact: dict, user_id: str):
             # Verificar si tiene foto de perfil
             if contact.get('avatar'):
                 # Mostrar foto de perfil
-                avatar_b64 = base64.b64encode(contact['avatar']).decode()
+                avatar_b64 = bytes_to_b64(contact['avatar'])
                 st.markdown(f"""
                 <div style="
                     width: 48px;
@@ -7712,7 +7752,7 @@ def render_conversation_window(conn, conversation_id: int, user_id: str):
                 bg = "#2a4a7c" if is_own else "#2a2a2a"
                 name = "Tú" if is_own else msg['sender_name']
                 try:
-                    t = datetime.strptime(msg['sent_at'], '%Y-%m-%d %H:%M:%S').strftime('%d/%m %H:%M')
+                    t = (parse_dt(msg['sent_at']) or datetime.min).strftime('%d/%m %H:%M')
                 except Exception:
                     t = msg.get('sent_at', '')
                 safe_text = html_mod.escape(msg['message_text'])
@@ -7828,7 +7868,7 @@ def render_message_bubble(message: dict, is_own_message: bool):
     try:
         if message.get('sender_avatar') and message['sender_avatar']:
             # Tiene foto de perfil
-            avatar_b64 = base64.b64encode(message['sender_avatar']).decode('utf-8')
+            avatar_b64 = bytes_to_b64(message['sender_avatar'])
             avatar_content = f'<img src="data:image/png;base64,{avatar_b64}" style="width: 100%; height: 100%; object-fit: cover;">'
         else:
             # Sin foto, mostrar inicial
@@ -7849,7 +7889,7 @@ def render_message_bubble(message: dict, is_own_message: bool):
                 # Imágenes: mostrar miniatura inline
                 if file_type in ['image/png', 'image/jpeg', 'image/gif']:
                     try:
-                        img_b64 = base64.b64encode(file_data['file_content']).decode('utf-8')
+                        img_b64 = bytes_to_b64(file_data['file_content'])
                         attachments_html += f'<div style="margin-top: 8px;"><img src="data:{file_type};base64,{img_b64}" style="max-width: 200px; max-height: 200px; border-radius: 8px; display: block; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.3);" onclick="window.open(this.src, \'_blank\')"></div>'
                     except:
                         pass
@@ -7867,7 +7907,7 @@ def render_message_bubble(message: dict, is_own_message: bool):
                     file_name_short = attachment['file_name'][:30] + "..." if len(attachment['file_name']) > 30 else attachment['file_name']
                     
                     # Crear data URI para descarga
-                    file_b64 = base64.b64encode(file_data['file_content']).decode('utf-8')
+                    file_b64 = bytes_to_b64(file_data['file_content'])
                     data_uri = f"data:{file_type};base64,{file_b64}"
                     
                     attachments_html += f'<a href="{data_uri}" download="{attachment["file_name"]}" style="text-decoration: none; color: inherit;"><div style="margin-top: 8px; padding: 8px 12px; background: rgba(255,255,255,0.1); border-radius: 8px; display: inline-block; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background=\'rgba(255,255,255,0.2)\'" onmouseout="this.style.background=\'rgba(255,255,255,0.1)\'"><div style="font-size: 13px;">{file_icon} {file_name_short}</div><div style="font-size: 11px; opacity: 0.7; margin-top: 2px;">{size_str} • Click para descargar</div></div></a>'
@@ -8023,7 +8063,7 @@ def render_shop_page(conn, user):
                 with col2:
                     st.write(f"🪙 {purchase['coins_spent']}")
                 with col3:
-                    st.write(f"📅 {purchase['purchased_at'][:10]}")
+                    st.write(f"📅 {fmt_date(purchase['purchased_at'])}")
         else:
             st.info("No has canjeado recompensas aún")
         

@@ -82,42 +82,8 @@ class DailyQuestionManager:
     
     @staticmethod
     def _ensure_table():
-        """Asegura que existe la tabla de preguntas diarias"""
-        conn = db_manager.get_connection()
-        c = conn.cursor()
-        
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS daily_questions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                question_date DATE NOT NULL UNIQUE,
-                question_text TEXT NOT NULL,
-                option_a TEXT NOT NULL,
-                option_b TEXT NOT NULL,
-                option_c TEXT NOT NULL,
-                option_d TEXT NOT NULL,
-                correct_answer TEXT NOT NULL,
-                explanation TEXT,
-                difficulty TEXT DEFAULT 'medium',
-                topic TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS daily_question_answers (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id TEXT NOT NULL,
-                question_id INTEGER NOT NULL,
-                user_answer TEXT NOT NULL,
-                is_correct INTEGER NOT NULL,
-                answered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users(username),
-                FOREIGN KEY (question_id) REFERENCES daily_questions(id),
-                UNIQUE(user_id, question_id)
-            )
-        ''')
-        
-        conn.commit()
+        """Tablas daily_questions y daily_question_answers creadas en database.py — no-op."""
+        pass
     
     @staticmethod
     def generate_daily_question():

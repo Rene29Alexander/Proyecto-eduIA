@@ -28,7 +28,7 @@ st.set_page_config(
 # 2. IMPORTS
 # ==========================================
 try:
-    from database import db_manager, init_db, hash_password, verify_password, generate_user_code
+    from database import db_manager, init_db, hash_password, verify_password, generate_user_code, parse_dt, bytes_to_b64
     from styles import inject_custom_css
     from utils_ai import ai_manager, configure_ai
     from utils_security import security
@@ -78,6 +78,75 @@ try:
 except Exception as e:
     st.error(f"Error BD: {e}")
     st.stop()
+
+
+# ── Contadores del sidebar cacheados (10 segundos TTL) ────────────────────────
+@st.cache_data(ttl=10, show_spinner=False)
+def _get_sidebar_counts(_conn_id, username, role):
+    """
+    Obtiene los contadores de mensajes no leídos para el sidebar.
+    Cacheado 10 segundos para evitar queries en cada tecla.
+    _conn_id se usa para que el cache sea por usuario (no por conexión real).
+    """
+    try:
+        conn_ref = db_manager.get_connection()
+        counts = {}
+
+        # Notificaciones
+        counts['notif'] = conn_ref.execute(
+            "SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = 0",
+            (username,)
+        ).fetchone()[0]
+
+        if role == 'student':
+            # Chat privado
+            counts['chat'] = conn_ref.execute(
+                "SELECT COUNT(*) FROM private_messages WHERE recipient_id = ? AND is_read = 0",
+                (username,)
+            ).fetchone()[0]
+            # Chat admin
+            counts['admin_chat'] = conn_ref.execute(
+                "SELECT COUNT(*) FROM admin_student_messages WHERE student_id = ? AND sender_id != ? AND (is_read_by NOT LIKE ?)",
+                (username, username, f'%"{username}"%')
+            ).fetchone()[0]
+
+        elif role == 'teacher':
+            # Chat privado
+            counts['chat'] = conn_ref.execute(
+                "SELECT COUNT(*) FROM private_messages WHERE recipient_id = ? AND is_read = 0",
+                (username,)
+            ).fetchone()[0]
+            # Chat admin
+            counts['admin_chat'] = conn_ref.execute(
+                "SELECT COUNT(*) FROM admin_teacher_messages WHERE teacher_id = ? AND sender_id != ? AND (is_read_by NOT LIKE ?)",
+                (username, username, f'%"{username}"%')
+            ).fetchone()[0]
+
+        elif role == 'admin':
+            # Chat grupal admins
+            counts['admin_grp'] = conn_ref.execute(
+                "SELECT COUNT(*) FROM admin_messages WHERE sender_id != ? AND (is_read_by NOT LIKE ?)",
+                (username, f'%"{username}"%')
+            ).fetchone()[0]
+            # Mensajes directos
+            counts['admin_dm'] = conn_ref.execute(
+                "SELECT COUNT(*) FROM admin_direct_messages WHERE recipient_id = ? AND is_read = 0",
+                (username,)
+            ).fetchone()[0]
+            # Docentes
+            counts['teacher_chat'] = conn_ref.execute(
+                "SELECT COUNT(*) FROM admin_teacher_messages WHERE sender_id != ? AND (is_read_by NOT LIKE ?)",
+                (username, f'%"{username}"%')
+            ).fetchone()[0]
+            # Estudiantes
+            counts['student_chat'] = conn_ref.execute(
+                "SELECT COUNT(*) FROM admin_student_messages WHERE sender_id != ? AND (is_read_by NOT LIKE ?)",
+                (username, f'%"{username}"%')
+            ).fetchone()[0]
+
+        return counts
+    except Exception:
+        return {}
 
 # Inicializar IA
 try:
@@ -234,47 +303,33 @@ def process_login_logic(username, password):
         db_manager.log_activity(username, 'login_failed_pwd', ip=ip)
         return False
 
+@st.cache_data(ttl=300, show_spinner=False)
 def get_logo_config():
-    """Obtiene la configuración del logo desde la base de datos"""
+    """Obtiene la configuración del logo desde la base de datos (cacheado 5 min)"""
     try:
-        # Intentar obtener de system_settings primero
-        logo_data = conn.execute(
+        logo_data = db_manager.get_connection().execute(
             "SELECT value FROM system_settings WHERE key = 'logo_url'"
         ).fetchone()
-        
         if not logo_data:
-            # Intentar de settings
-            logo_data = conn.execute(
+            logo_data = db_manager.get_connection().execute(
                 "SELECT value FROM settings WHERE key = 'logo_url'"
             ).fetchone()
-        
-        if logo_data and logo_data[0]:
-            return logo_data[0]
-        
-        # Si no hay logo configurado, retornar None
-        return None
+        return logo_data[0] if logo_data and logo_data[0] else None
     except:
         return None
 
+@st.cache_data(ttl=300, show_spinner=False)
 def get_background_config():
-    """Obtiene la configuración del fondo del login desde la base de datos"""
+    """Obtiene la configuración del fondo del login desde la base de datos (cacheado 5 min)"""
     try:
-        # Intentar obtener de system_settings primero
-        bg_data = conn.execute(
+        bg_data = db_manager.get_connection().execute(
             "SELECT value FROM system_settings WHERE key = 'login_background_url'"
         ).fetchone()
-        
         if not bg_data:
-            # Intentar de settings
-            bg_data = conn.execute(
+            bg_data = db_manager.get_connection().execute(
                 "SELECT value FROM settings WHERE key = 'login_background_url'"
             ).fetchone()
-        
-        if bg_data and bg_data[0]:
-            return bg_data[0]
-        
-        # Si no hay fondo configurado, retornar None (usará gradiente por defecto)
-        return None
+        return bg_data[0] if bg_data and bg_data[0] else None
     except:
         return None
 
@@ -750,7 +805,7 @@ def view_profile():
                 pass
             
             if data['avatar']:
-                b64 = base64.b64encode(data['avatar']).decode()
+                b64 = bytes_to_b64(data['avatar'])
                 st.markdown(f'<img src="data:image/png;base64,{b64}" style="width:150px;height:150px;border-radius:50%;{cosmetic_frame if cosmetic_frame else "border:3px solid #4a8fd8"};object-fit:cover">', unsafe_allow_html=True)
             else:
                 st.markdown(f"""
@@ -912,7 +967,7 @@ def view_profile():
             with col_current:
                 st.markdown("**Foto actual:**")
                 if data['avatar']:
-                    b64 = base64.b64encode(data['avatar']).decode()
+                    b64 = bytes_to_b64(data['avatar'])
                     st.markdown(f'<img src="data:image/png;base64,{b64}" style="width:100px;border-radius:50%">', unsafe_allow_html=True)
                 else:
                     st.markdown("""
@@ -1127,7 +1182,7 @@ def view_notifications_page(conn=None):
         for n in ns:
             icon = icon_map.get(n.get('type', 'info'), '🔔')
             try:
-                fecha = datetime.strptime(n['created_at'], '%Y-%m-%d %H:%M:%S').strftime('%d/%m/%Y %H:%M')
+                fecha = (parse_dt(n['created_at']) or datetime.min).strftime('%d/%m/%Y %H:%M')
             except Exception:
                 fecha = n['created_at'] or ''
             col_msg, col_btn = st.columns([10, 1])
@@ -1159,7 +1214,7 @@ def render_sidebar():
         if u.get('avatar'):
             # Si tiene avatar, mostrarlo
             import base64
-            b64 = base64.b64encode(u['avatar']).decode()
+            b64 = bytes_to_b64(u['avatar'])
             st.markdown(f"""
             <div style="text-align: center; margin-bottom: 15px;">
                 <img src="data:image/png;base64,{b64}" 
@@ -1235,13 +1290,8 @@ def render_sidebar():
             
             # Chat privado (solo para estudiantes con cuenta completa)
             if u.get('account_type') != 'free':
-                try:
-                    chat_unread = conn.execute("""
-                        SELECT COUNT(*) FROM private_messages
-                        WHERE recipient_id = ? AND is_read = 0
-                    """, (u['username'],)).fetchone()[0]
-                except Exception:
-                    chat_unread = 0
+                _sc = _get_sidebar_counts(id(conn), u['username'], u['role'])
+                chat_unread = _sc.get('chat', 0)
                 chat_label = f"💬 Chat ({chat_unread})" if chat_unread > 0 else "💬 Chat"
                 if st.button(chat_label, use_container_width=True):
                     clear_page_states()
@@ -1250,12 +1300,8 @@ def render_sidebar():
                     st.rerun()
             
             # Notificaciones
-            try:
-                notif_unread = conn.execute("""
-                    SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = 0
-                """, (u['username'],)).fetchone()[0]
-            except Exception:
-                notif_unread = 0
+            _sc = _get_sidebar_counts(id(conn), u['username'], u['role'])
+            notif_unread = _sc.get('notif', 0)
             notif_label = f"🔔 Notificaciones ({notif_unread})" if notif_unread > 0 else "🔔 Notificaciones"
             if st.button(notif_label, use_container_width=True):
                 clear_page_states()
@@ -1271,14 +1317,9 @@ def render_sidebar():
                 st.session_state.current_page = 'dashboard'
                 st.rerun()
 
-            # Chat con administración
-            try:
-                stu_admin_unread = conn.execute("""
-                    SELECT COUNT(*) FROM admin_student_messages
-                    WHERE student_id = ? AND sender_id != ? AND (is_read_by NOT LIKE ?)
-                """, (u['username'], u['username'], f'%"{u["username"]}"%')).fetchone()[0]
-            except Exception:
-                stu_admin_unread = 0
+            # Chat con administración (estudiante)
+            _sc = _get_sidebar_counts(id(conn), u['username'], u['role'])
+            stu_admin_unread = _sc.get('admin_chat', 0)
             stu_adm_label = f"🏛️ Chat Administración ({stu_admin_unread})" if stu_admin_unread > 0 else "🏛️ Chat Administración"
             if st.button(stu_adm_label, key="student_admin_chat_btn", use_container_width=True,
                          type="primary" if st.session_state.current_page == 'student_admin_chat' else "secondary"):
@@ -1287,14 +1328,11 @@ def render_sidebar():
                 
         elif u['role'] == 'teacher':
             
+            # Obtener contadores cacheados para docente
+            _sc = _get_sidebar_counts(id(conn), u['username'], u['role'])
+            
             # Chat privado para profesores
-            try:
-                chat_unread = conn.execute("""
-                    SELECT COUNT(*) FROM private_messages
-                    WHERE recipient_id = ? AND is_read = 0
-                """, (u['username'],)).fetchone()[0]
-            except Exception:
-                chat_unread = 0
+            chat_unread = _sc.get('chat', 0)
             chat_label = f"💬 Chat ({chat_unread})" if chat_unread > 0 else "💬 Chat"
             if st.button(chat_label, use_container_width=True):
                 clear_page_states()
@@ -1303,13 +1341,7 @@ def render_sidebar():
                 st.rerun()
 
             # Chat con administración
-            try:
-                admin_reply_unread = conn.execute("""
-                    SELECT COUNT(*) FROM admin_teacher_messages
-                    WHERE teacher_id = ? AND sender_id != ? AND (is_read_by NOT LIKE ?)
-                """, (u['username'], u['username'], f'%"{u["username"]}"%')).fetchone()[0]
-            except Exception:
-                admin_reply_unread = 0
+            admin_reply_unread = _sc.get('admin_chat', 0)
             adm_label = f"🏛️ Chat Administración ({admin_reply_unread})" if admin_reply_unread > 0 else "🏛️ Chat Administración"
             if st.button(adm_label, key="teacher_admin_chat_btn", use_container_width=True,
                          type="primary" if st.session_state.current_page == 'teacher_admin_chat' else "secondary"):
@@ -1317,15 +1349,7 @@ def render_sidebar():
                 st.rerun()
             
             # Notificaciones para profesores
-            try:
-                if conn:
-                    notif_unread = conn.execute("""
-                        SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = 0
-                    """, (u['username'],)).fetchone()[0]
-                else:
-                    notif_unread = 0
-            except Exception:
-                notif_unread = 0
+            notif_unread = _sc.get('notif', 0)
             notif_label = f"🔔 Notificaciones ({notif_unread})" if notif_unread > 0 else "🔔 Notificaciones"
             if st.button(notif_label, key="teacher_notif_btn", use_container_width=True):
                 st.session_state.current_page = 'notifications_full'
@@ -1360,14 +1384,11 @@ def render_sidebar():
             # ── Sección CHATS ──────────────────────────────────────────────
             st.markdown('<div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#475569;padding:4px 0 6px 0;">💬 Chats</div>', unsafe_allow_html=True)
 
+            # Obtener contadores cacheados para admin
+            _sc = _get_sidebar_counts(id(conn), u['username'], u['role'])
+
             # Chat grupal de admins
-            try:
-                admin_unread = conn.execute("""
-                    SELECT COUNT(*) FROM admin_messages
-                    WHERE sender_id != ? AND (is_read_by NOT LIKE ?)
-                """, (u['username'], f'%"{u["username"]}"%')).fetchone()[0]
-            except Exception:
-                admin_unread = 0
+            admin_unread = _sc.get('admin_grp', 0)
             grp_label = f"👥 Chat Grupal ({admin_unread})" if admin_unread > 0 else "👥 Chat Grupal"
             if st.button(grp_label, key="admin_chat_btn", use_container_width=True,
                          type="primary" if st.session_state.current_page == 'admin_chat' else "secondary"):
@@ -1375,41 +1396,23 @@ def render_sidebar():
                 st.rerun()
 
             # Mensajes directos entre admins
-            try:
-                dm_unread = conn.execute("""
-                    SELECT COUNT(*) FROM admin_direct_messages
-                    WHERE recipient_id = ? AND is_read = 0
-                """, (u['username'],)).fetchone()[0]
-            except Exception:
-                dm_unread = 0
+            dm_unread = _sc.get('admin_dm', 0)
             dm_label = f"🔒 Mensajes Directos ({dm_unread})" if dm_unread > 0 else "🔒 Mensajes Directos"
             if st.button(dm_label, key="admin_dm_btn", use_container_width=True,
                          type="primary" if st.session_state.current_page == 'admin_dm' else "secondary"):
                 st.session_state.current_page = 'admin_dm'
                 st.rerun()
 
-            # Chat con docentes (visible para todos los admins)
-            try:
-                teacher_unread = conn.execute("""
-                    SELECT COUNT(*) FROM admin_teacher_messages
-                    WHERE sender_id != ? AND (is_read_by NOT LIKE ?)
-                """, (u['username'], f'%"{u["username"]}"%')).fetchone()[0]
-            except Exception:
-                teacher_unread = 0
+            # Chat con docentes
+            teacher_unread = _sc.get('teacher_chat', 0)
             tc_label = f"👨‍🏫 Chat Docentes ({teacher_unread})" if teacher_unread > 0 else "👨‍🏫 Chat Docentes"
             if st.button(tc_label, key="admin_teacher_chat_btn", use_container_width=True,
                          type="primary" if st.session_state.current_page == 'admin_teacher_chat' else "secondary"):
                 st.session_state.current_page = 'admin_teacher_chat'
                 st.rerun()
 
-            # Chat con estudiantes (visible para todos los admins)
-            try:
-                stu_unread = conn.execute("""
-                    SELECT COUNT(*) FROM admin_student_messages
-                    WHERE sender_id != ? AND (is_read_by NOT LIKE ?)
-                """, (u['username'], f'%"{u["username"]}"%')).fetchone()[0]
-            except Exception:
-                stu_unread = 0
+            # Chat con estudiantes
+            stu_unread = _sc.get('student_chat', 0)
             stu_label = f"🎓 Chat Estudiantes ({stu_unread})" if stu_unread > 0 else "🎓 Chat Estudiantes"
             if st.button(stu_label, key="admin_student_chat_btn", use_container_width=True,
                          type="primary" if st.session_state.current_page == 'admin_student_chat' else "secondary"):

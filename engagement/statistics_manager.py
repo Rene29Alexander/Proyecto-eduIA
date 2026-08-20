@@ -28,12 +28,11 @@ class StatisticsManager:
             (user_id, activity_date, exercises_completed, time_spent_minutes, points_earned, challenges_completed)
             VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id, activity_date) DO UPDATE SET
-                exercises_completed = exercises_completed + ?,
-                time_spent_minutes = time_spent_minutes + ?,
-                points_earned = points_earned + ?,
-                challenges_completed = challenges_completed + ?
-        ''', (user_id, today, exercises, time_minutes, points, challenges,
-              exercises, time_minutes, points, challenges))
+                exercises_completed  = activity_calendar.exercises_completed  + EXCLUDED.exercises_completed,
+                time_spent_minutes   = activity_calendar.time_spent_minutes   + EXCLUDED.time_spent_minutes,
+                points_earned        = activity_calendar.points_earned        + EXCLUDED.points_earned,
+                challenges_completed = activity_calendar.challenges_completed + EXCLUDED.challenges_completed
+        ''', (user_id, today, exercises, time_minutes, points, challenges))
         
         conn.commit()
     

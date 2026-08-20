@@ -213,12 +213,14 @@ class QueryOptimizer:
     @staticmethod
     def explain_query(conn, query, params=None):
         """Analiza plan de ejecución de una query"""
-        explain_query = f"EXPLAIN QUERY PLAN {query}"
+        from database import USE_POSTGRES
+        prefix = "EXPLAIN ANALYZE" if USE_POSTGRES else "EXPLAIN QUERY PLAN"
+        explain_q = f"{prefix} {query}"
         
         if params:
-            result = conn.execute(explain_query, params).fetchall()
+            result = conn.execute(explain_q, params).fetchall()
         else:
-            result = conn.execute(explain_query).fetchall()
+            result = conn.execute(explain_q).fetchall()
         
         return result
 

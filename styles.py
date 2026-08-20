@@ -284,16 +284,16 @@ def inject_custom_css():
             100% {{ transform: rotate(360deg); }}
         }}
         
-        /* Mejoras para dispositivos móviles */
+        /* Mejoras para dispositivos móviles — ver sección RESPONSIVIDAD MÓVIL abajo */
         @media (max-width: 480px) {{
             .stButton > button {{
-                padding: 0.75rem 1rem;
+                padding: 0.65rem 1rem;
                 font-size: 0.9rem;
             }}
             
             .card {{
-                padding: 1rem;
-                margin-bottom: 0.75rem;
+                padding: 0.85rem;
+                margin-bottom: 0.65rem;
             }}
         }}
         
@@ -355,22 +355,175 @@ def inject_custom_css():
             padding: 1.5rem;
         }}
         
-        /* ===== RESPONSIVIDAD ===== */
+        /* ===== RESPONSIVIDAD MÓVIL ===== */
+
+        /* ── Viewport meta forzado para móvil ── */
         @media (max-width: 768px) {{
-            .course-card {{
-                margin-bottom: 1rem;
+            /* Contenedor principal — sin padding lateral excesivo */
+            .main .block-container {{
+                padding-left: 0.75rem !important;
+                padding-right: 0.75rem !important;
+                padding-top: 0.75rem !important;
+                max-width: 100% !important;
             }}
-            
-            .card {{
-                padding: 1rem;
+
+            /* Sidebar colapsado por defecto en móvil */
+            [data-testid="stSidebar"] {{
+                min-width: 80vw !important;
+                max-width: 85vw !important;
             }}
-            
+
+            /* Títulos más compactos */
             h1 {{
-                font-size: 1.5rem;
+                font-size: 1.4rem !important;
+                line-height: 1.3 !important;
+                margin-bottom: 0.5rem !important;
             }}
-            
             h2 {{
-                font-size: 1.25rem;
+                font-size: 1.2rem !important;
+                margin-bottom: 0.4rem !important;
+            }}
+            h3 {{
+                font-size: 1.05rem !important;
+            }}
+
+            /* Tarjetas sin hover transform en móvil (evita saltos) */
+            .card:hover, .course-card:hover {{
+                transform: none !important;
+            }}
+
+            /* Tarjetas padding reducido */
+            .card {{
+                padding: 0.85rem !important;
+                margin-bottom: 0.65rem !important;
+            }}
+
+            /* Botones más grandes para toque */
+            .stButton > button {{
+                padding: 0.65rem 1rem !important;
+                font-size: 0.95rem !important;
+                min-height: 44px !important;
+                width: 100% !important;
+            }}
+
+            /* Columnas de Streamlit apiladas verticalmente */
+            [data-testid="column"] {{
+                width: 100% !important;
+                flex: 1 1 100% !important;
+                min-width: 100% !important;
+            }}
+
+            /* Inputs más grandes para toque */
+            .stTextInput > div > div > input,
+            .stTextArea > div > div > textarea,
+            .stSelectbox > div > div,
+            .stNumberInput > div > div > input {{
+                font-size: 1rem !important;
+                min-height: 44px !important;
+            }}
+
+            /* Selectbox dropdown */
+            .stSelectbox [data-baseweb="select"] {{
+                min-height: 44px !important;
+            }}
+
+            /* Métricas apiladas */
+            [data-testid="stMetric"] {{
+                padding: 0.5rem !important;
+            }}
+
+            /* DataFrames con scroll horizontal */
+            .stDataFrame {{
+                overflow-x: auto !important;
+                -webkit-overflow-scrolling: touch;
+            }}
+
+            /* Tabs — scroll horizontal si hay muchas */
+            .stTabs [data-baseweb="tab-list"] {{
+                overflow-x: auto !important;
+                -webkit-overflow-scrolling: touch;
+                flex-wrap: nowrap !important;
+                scrollbar-width: none;
+            }}
+            .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar {{
+                display: none;
+            }}
+            .stTabs [data-baseweb="tab"] {{
+                white-space: nowrap !important;
+                font-size: 0.85rem !important;
+                padding: 0.5rem 0.75rem !important;
+                min-height: 44px !important;
+            }}
+
+            /* Expanders más compactos */
+            .streamlit-expanderHeader {{
+                font-size: 0.95rem !important;
+                padding: 0.65rem !important;
+                min-height: 44px !important;
+            }}
+
+            /* Avatares más pequeños en móvil */
+            img[style*="border-radius: 50%"] {{
+                width: 40px !important;
+                height: 40px !important;
+            }}
+
+            /* Ocultar columnas decorativas en móvil */
+            .hide-mobile {{
+                display: none !important;
+            }}
+
+            /* Texto caption más legible */
+            .stCaption, caption {{
+                font-size: 0.8rem !important;
+            }}
+
+            /* Formularios sin padding extra */
+            .stForm {{
+                padding: 0.75rem !important;
+            }}
+
+            /* Chat messages más compactos */
+            div[style*="border-radius:12px"] {{
+                max-width: 90% !important;
+            }}
+        }}
+
+        /* ── Teléfonos muy pequeños (< 390px) ── */
+        @media (max-width: 390px) {{
+            .main .block-container {{
+                padding-left: 0.5rem !important;
+                padding-right: 0.5rem !important;
+            }}
+
+            h1 {{
+                font-size: 1.2rem !important;
+            }}
+
+            .stButton > button {{
+                font-size: 0.88rem !important;
+                padding: 0.6rem 0.75rem !important;
+            }}
+
+            .stTabs [data-baseweb="tab"] {{
+                font-size: 0.78rem !important;
+                padding: 0.4rem 0.6rem !important;
+            }}
+        }}
+
+        /* ── Tablet (768px - 1024px) ── */
+        @media (min-width: 769px) and (max-width: 1024px) {{
+            .main .block-container {{
+                padding-left: 1.5rem !important;
+                padding-right: 1.5rem !important;
+            }}
+
+            h1 {{
+                font-size: 1.7rem !important;
+            }}
+
+            .stButton > button {{
+                min-height: 40px !important;
             }}
         }}
         

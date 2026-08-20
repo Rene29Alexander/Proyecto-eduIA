@@ -87,7 +87,11 @@ class StreakManager:
         if not streak_data:
             return False, False
 
-        current_streak, longest_streak, last_activity_str, freeze_count, total_days = streak_data
+        current_streak    = streak_data['current_streak']
+        longest_streak    = streak_data['longest_streak']
+        last_activity_str = streak_data['last_activity_date']
+        freeze_count      = streak_data['freeze_count']
+        total_days        = streak_data['total_days_active']
 
         if current_streak == 0 or not last_activity_str:
             return False, False
@@ -151,7 +155,11 @@ class StreakManager:
         if not streak_data:
             return False
 
-        current_streak, longest_streak, last_activity_str, freeze_count, total_days = streak_data
+        current_streak    = streak_data['current_streak']
+        longest_streak    = streak_data['longest_streak']
+        last_activity_str = streak_data['last_activity_date']
+        freeze_count      = streak_data['freeze_count']
+        total_days        = streak_data['total_days_active']
 
         last_activity = StreakManager._parse_date(last_activity_str)
 
@@ -223,7 +231,11 @@ class StreakManager:
                 'freeze_active': False
             }
 
-        current_streak, longest_streak, last_activity_str, freeze_count, total_days = streak_data
+        current_streak    = streak_data['current_streak']
+        longest_streak    = streak_data['longest_streak']
+        last_activity_str = streak_data['last_activity_date']
+        freeze_count      = streak_data['freeze_count']
+        total_days        = streak_data['total_days_active']
 
         is_at_risk = False
         freeze_active = False

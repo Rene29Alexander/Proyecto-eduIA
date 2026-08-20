@@ -12,26 +12,27 @@ import time
 import hashlib
 import io
 from datetime import datetime, date, timedelta
-from database import db_manager, hash_password, verify_password
+from database import db_manager, hash_password, verify_password, parse_dt, bytes_to_b64
 from utils_security import security
 from utils_notifications import notification_manager
 
 def check_admin_schema(conn):
-    """Asegura que existan todas las columnas necesarias"""
+    """Asegura que existan todas las columnas necesarias — compatible con SQLite y PostgreSQL"""
+    from database import USE_POSTGRES
     cursor = conn.cursor()
-    
-    # Lista de columnas a verificar/crear en usuarios
+
+    # En PostgreSQL, ALTER TABLE ADD COLUMN IF NOT EXISTS es la sintaxis correcta
     user_columns = [
         ('first_name', 'TEXT'),
         ('last_name', 'TEXT'),
         ('full_name', 'TEXT'),
-        ('user_code', 'TEXT UNIQUE'),
-        ('bio', 'TEXT DEFAULT ""'),
-        ('title', 'TEXT DEFAULT ""'),
-        ('subjects', 'TEXT DEFAULT ""'),
-        ('social_links', 'TEXT DEFAULT ""'),
-        ('avatar', 'BLOB'),
-        ('theme', 'TEXT DEFAULT "dark"'),
+        ('user_code', 'TEXT'),
+        ('bio', 'TEXT DEFAULT \'\''),
+        ('title', 'TEXT DEFAULT \'\''),
+        ('subjects', 'TEXT DEFAULT \'\''),
+        ('social_links', 'TEXT DEFAULT \'\''),
+        ('avatar', 'BLOB' if not USE_POSTGRES else 'BYTEA'),
+        ('theme', 'TEXT DEFAULT \'dark\''),
         ('force_reset', 'INTEGER DEFAULT 0'),
         ('join_date', 'DATE DEFAULT CURRENT_DATE'),
         ('last_login', 'TIMESTAMP'),
@@ -40,15 +41,18 @@ def check_admin_schema(conn):
         ('created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
         ('updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
     ]
-    
+
     for column_name, column_type in user_columns:
         try:
-            cursor.execute(f"ALTER TABLE users ADD COLUMN {column_name} {column_type}")
+            if USE_POSTGRES:
+                cursor.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {column_name} {column_type}")
+            else:
+                cursor.execute(f"ALTER TABLE users ADD COLUMN {column_name} {column_type}")
             conn.commit()
-        except:
+        except Exception:
             pass
-    
-    # Verificar configuración del sistema
+
+    # Verificar y poblar system_settings (ya creada por init_db, pero asegurar datos)
     try:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS system_settings (
@@ -58,47 +62,50 @@ def check_admin_schema(conn):
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
-        # Configuración por defecto
-        default_settings = [
-            ('site_name', 'Plataforma Educativa IA', 'Nombre del sitio'),
-            ('site_description', 'Plataforma educativa con inteligencia artificial', 'Descripción del sitio'),
-            ('allow_registrations', '1', 'Permitir nuevos registros'),
-            ('default_theme', 'dark', 'Tema por defecto'),
-            ('maintenance_mode', '0', 'Modo mantenimiento'),
-            ('max_file_size_mb', '10', 'Tamaño máximo de archivos (MB)'),
-            ('session_timeout_minutes', '120', 'Tiempo de expiración de sesión'),
-            ('ai_enabled', '1', 'Habilitar funciones de IA'),
-            ('backup_enabled', '1', 'Habilitar backups automáticos'),
-            ('email_notifications', '1', 'Habilitar notificaciones por email'),
-            ('logo_url', '', 'URL del logo del sitio'),
-            ('footer_text', '© 2026 Plataforma Educativa IA', 'Texto del footer'),
-            ('gym_block_paste', '1', 'Bloquear pegar código en el Gimnasio de Código'),
-            # Pool de API keys de Gemini (Semana 5 — rotación automática)
-            ('gemini_api_key',   '', 'API Key de Gemini AI (principal)'),
-            ('gemini_api_key_2', '', 'API Key de Gemini AI (alternativa 2)'),
-            ('gemini_api_key_3', '', 'API Key de Gemini AI (alternativa 3)'),
-            ('gemini_api_key_4', '', 'API Key de Gemini AI (alternativa 4)'),
-            ('gemini_api_key_5', '', 'API Key de Gemini AI (alternativa 5)'),
-        ]
-        
-        for key, value, description in default_settings:
-            try:
+        conn.commit()
+    except Exception:
+        pass
+
+    default_settings = [
+        ('site_name', 'Plataforma Educativa IA', 'Nombre del sitio'),
+        ('site_description', 'Plataforma educativa con inteligencia artificial', 'Descripción del sitio'),
+        ('allow_registrations', '1', 'Permitir nuevos registros'),
+        ('default_theme', 'dark', 'Tema por defecto'),
+        ('maintenance_mode', '0', 'Modo mantenimiento'),
+        ('max_file_size_mb', '10', 'Tamaño máximo de archivos (MB)'),
+        ('session_timeout_minutes', '120', 'Tiempo de expiración de sesión'),
+        ('ai_enabled', '1', 'Habilitar funciones de IA'),
+        ('backup_enabled', '1', 'Habilitar backups automáticos'),
+        ('email_notifications', '1', 'Habilitar notificaciones por email'),
+        ('logo_url', '', 'URL del logo del sitio'),
+        ('footer_text', '© 2026 Plataforma Educativa IA', 'Texto del footer'),
+        ('gym_block_paste', '1', 'Bloquear pegar código en el Gimnasio de Código'),
+    ]
+
+    for key, value, description in default_settings:
+        try:
+            if USE_POSTGRES:
+                cursor.execute(
+                    "INSERT INTO system_settings (key, value, description) VALUES (%s, %s, %s) ON CONFLICT (key) DO NOTHING",
+                    (key, value, description)
+                )
+            else:
                 cursor.execute(
                     "INSERT OR IGNORE INTO system_settings (key, value, description) VALUES (?, ?, ?)",
                     (key, value, description)
                 )
-            except:
-                pass
-        
+        except Exception:
+            pass
+
+    try:
         conn.commit()
-    except Exception as e:
-        print(f"Error configurando sistema: {e}")
+    except Exception:
+        pass
 
 def render_user_avatar(avatar_bytes, size=50):
     """Renderiza avatar del usuario"""
     if avatar_bytes:
-        b64 = base64.b64encode(avatar_bytes).decode()
+        b64 = bytes_to_b64(avatar_bytes)
         src = f"data:image/png;base64,{b64}"
     else:
         src = "https://cdn-icons-png.flaticon.com/512/847/847969.png"
@@ -171,8 +178,10 @@ def view_admin(conn):
     if 'admin_edit_course' not in st.session_state:
         st.session_state.admin_edit_course = None
     
-    # Verificar esquema
-    check_admin_schema(conn)
+    # Verificar esquema — solo una vez por sesión para evitar ALTER TABLE en cada rerun
+    if not st.session_state.get('_admin_schema_done'):
+        check_admin_schema(conn)
+        st.session_state._admin_schema_done = True
     
     # ==============================================================================
     # VISTA PRINCIPAL: DASHBOARD
@@ -255,7 +264,8 @@ def view_admin(conn):
                     bg    = "#2a4a7c" if is_mine else "#2a2a2a"
                     name  = "Tú" if is_mine else msg['sender_name']
                     try:
-                        t = datetime.strptime(msg['sent_at'], '%Y-%m-%d %H:%M:%S').strftime('%d/%m %H:%M')
+                        t = parse_dt(msg['sent_at'])
+                        t = t.strftime('%d/%m %H:%M') if t else ""
                     except Exception:
                         t = ""
                     safe = _html.escape(msg['message_text'])
@@ -316,7 +326,7 @@ def view_admin(conn):
         with col1:
             # Mostrar avatar del administrador
             if u.get('avatar'):
-                avatar_b64 = base64.b64encode(u['avatar']).decode()
+                avatar_b64 = bytes_to_b64(u['avatar'])
                 st.markdown(f"""
                 <div style="display: flex; justify-content: center; margin-top: 10px;">
                     <img src="data:image/png;base64,{avatar_b64}" 
@@ -892,13 +902,12 @@ def view_admin(conn):
             with col_cfilter2:
                 course_search = st.text_input("Buscar curso...", placeholder="Nombre, código o profesor")
             
-            # Obtener cursos
+            # Obtener cursos — subquery para COUNT evita GROUP BY no estándar
             course_query = """
-                SELECT c.*, u.full_name as teacher_name, 
-                       COUNT(e.student_id) as student_count
+                SELECT c.*, u.full_name as teacher_name,
+                       (SELECT COUNT(*) FROM enrollments e WHERE e.course_id = c.id) as student_count
                 FROM courses c
                 LEFT JOIN users u ON c.teacher_id = u.username
-                LEFT JOIN enrollments e ON c.id = e.course_id
             """
             course_params = []
             
@@ -915,7 +924,7 @@ def view_admin(conn):
             if where_clauses:
                 course_query += " WHERE " + " AND ".join(where_clauses)
             
-            course_query += " GROUP BY c.id ORDER BY c.created_at DESC"
+            course_query += " ORDER BY c.created_at DESC"
             
             courses_rows = conn.execute(course_query, course_params).fetchall()
             courses = [dict(c) for c in courses_rows]
@@ -930,7 +939,7 @@ def view_admin(conn):
                         with st.container(border=True):
                             # Imagen del curso
                             if course['cover_image']:
-                                img_src = f"data:image/png;base64,{base64.b64encode(course['cover_image']).decode()}"
+                                img_src = f"data:image/png;base64,{bytes_to_b64(course['cover_image'])}"
                             else:
                                 img_src = "https://images.unsplash.com/photo-1501504905252-473c47e087f8?w=400&h=200&fit=crop"
                             
@@ -1096,7 +1105,7 @@ def view_admin(conn):
                                 st.json(details, expanded=False)
 
                         col_a2.caption(
-                            datetime.strptime(activity['created_at'], '%Y-%m-%d %H:%M:%S').strftime('%d/%m/%Y %H:%M')
+                            (parse_dt(activity['created_at']) or datetime.min).strftime('%d/%m/%Y %H:%M')
                             if activity['created_at'] else '—'
                         )
             else:
@@ -1165,7 +1174,7 @@ def view_admin(conn):
                 if uploaded_logo:
                     # Convertir a base64 para almacenar
                     logo_bytes = uploaded_logo.getvalue()
-                    logo_b64 = base64.b64encode(logo_bytes).decode()
+                    logo_b64 = bytes_to_b64(logo_bytes)
                     logo_url_final = f"data:image/{uploaded_logo.type.split('/')[-1]};base64,{logo_b64}"
                     
                     # Vista previa
@@ -1227,7 +1236,7 @@ def view_admin(conn):
                 if uploaded_background:
                     # Convertir a base64 para almacenar
                     bg_bytes = uploaded_background.getvalue()
-                    bg_b64 = base64.b64encode(bg_bytes).decode()
+                    bg_b64 = bytes_to_b64(bg_bytes)
                     background_url_final = f"data:image/{uploaded_background.type.split('/')[-1]};base64,{bg_b64}"
                     
                     # Vista previa
@@ -1383,28 +1392,110 @@ def view_admin(conn):
                     
                     # Actualizar variable de sesión
                     st.session_state.ai_available = ai_enabled
-                    
-                    # Actualizar archivo secrets.toml si cambió la API key
+
+                    # En Streamlit Cloud el filesystem es read-only, no se puede
+                    # escribir secrets.toml — la API key ya se guardó en system_settings
+                    # (conn.execute arriba) y se leerá desde ahí al inicializar AIManager.
                     if gemini_api_key and gemini_api_key != current_api_key:
-                        try:
-                            import os
-                            secrets_path = ".streamlit/secrets.toml"
-                            os.makedirs(".streamlit", exist_ok=True)
-                            
-                            with open(secrets_path, 'w') as f:
-                                f.write(f'# API Key de Gemini\n')
-                                f.write(f'GEMINI_API_KEY = "{gemini_api_key}"\n')
-                            
-                            st.success("✅ Configuración guardada exitosamente")
-                            st.info("🔄 Reinicia la aplicación para que los cambios de la API key surtan efecto")
-                        except Exception as e:
-                            st.warning(f"⚠️ Configuración guardada pero no se pudo actualizar secrets.toml: {e}")
+                        st.success("✅ Configuración guardada exitosamente")
+                        st.info("🔄 Reinicia la aplicación para que los cambios de la API key surtan efecto")
                     else:
                         st.success("✅ Configuración guardada exitosamente")
                     
                     time.sleep(1)
                     st.rerun()
         
+        # ----------------------------------------------------------------------
+        # TAB 5.5: CONFIGURACIÓN DE BASE DE DATOS
+        # ----------------------------------------------------------------------
+        if _tab_active('configuracion'):
+
+            st.markdown("---")
+            st.markdown("#### 🗄️ Configuración de Base de Datos")
+            st.caption("Elige qué motor de base de datos usa la plataforma. Los cambios requieren reiniciar la aplicación.")
+
+            import os as _os
+            current_db_url = _os.getenv("DATABASE_URL", "").strip()
+            current_engine = "PostgreSQL (Supabase)" if current_db_url else "SQLite (local)"
+
+            col_db1, col_db2 = st.columns(2)
+            with col_db1:
+                st.metric("Motor actual", current_engine)
+            with col_db2:
+                if current_db_url:
+                    masked = current_db_url[:30] + "..." if len(current_db_url) > 30 else current_db_url
+                    st.metric("URL activa", masked)
+                else:
+                    st.metric("Archivo SQLite", "learning_platform.db")
+
+            st.markdown("##### Cambiar motor de base de datos")
+            db_option = st.radio(
+                "Selecciona el motor:",
+                ["SQLite (desarrollo local)", "PostgreSQL / Supabase (producción)"],
+                index=1 if current_db_url else 0,
+                key="admin_db_engine_choice",
+                help="SQLite es ideal para desarrollo. PostgreSQL/Supabase soporta 500+ usuarios simultáneos."
+            )
+
+            if db_option == "PostgreSQL / Supabase (producción)":
+                new_db_url = st.text_input(
+                    "URL de conexión PostgreSQL",
+                    value=current_db_url,
+                    placeholder="postgresql://postgres:PASSWORD@db.xxxx.supabase.co:5432/postgres",
+                    type="password",
+                    help="Obtener en Supabase: Settings → Database → Connection string → URI",
+                    key="admin_db_url_input"
+                )
+                # Leer desde session_state para garantizar el valor más reciente
+                new_db_url = st.session_state.get("admin_db_url_input", new_db_url)
+                st.caption("⚠️ Esta URL contiene tu contraseña. Se guardará en la base de datos del sistema (no en el repositorio).")
+            else:
+                new_db_url = ""
+                st.info("💡 Se usará SQLite local (`learning_platform.db`). No se necesita configuración adicional.")
+
+            col_save_db, col_test_db = st.columns(2)
+
+            with col_test_db:
+                if st.button("🔍 Probar conexión", key="admin_db_test", use_container_width=True):
+                    url_to_test = st.session_state.get("admin_db_url_input", "").strip()
+                    if db_option == "PostgreSQL / Supabase (producción)" and url_to_test:
+                        try:
+                            import psycopg2
+                            test_conn = psycopg2.connect(url_to_test, connect_timeout=10)
+                            test_conn.close()
+                            st.success("✅ Conexión exitosa a PostgreSQL")
+                        except ImportError:
+                            st.error("❌ psycopg2 no instalado. Ejecuta: pip install psycopg2-binary")
+                        except Exception as e:
+                            st.error(f"❌ No se pudo conectar: {str(e)[:100]}")
+                    elif db_option == "SQLite (desarrollo local)":
+                        st.success("✅ SQLite siempre está disponible localmente")
+                    else:
+                        st.warning("⚠️ Ingresa una URL de PostgreSQL primero")
+
+            with col_save_db:
+                if st.button("💾 Guardar configuración BD", type="primary", key="admin_db_save", use_container_width=True):
+                    url_to_save = st.session_state.get("admin_db_url_input", "").strip()
+                    try:
+                        # Guardar DATABASE_URL en system_settings (compatible con Streamlit Cloud)
+                        if url_to_save and db_option == "PostgreSQL / Supabase (producción)":
+                            conn.execute("""
+                                INSERT OR REPLACE INTO system_settings (key, value, updated_at)
+                                VALUES ('database_url', ?, ?)
+                            """, (url_to_save, datetime.now()))
+                            conn.commit()
+                            st.success("✅ URL de PostgreSQL guardada. Reinicia la app para aplicar el cambio.")
+                        else:
+                            conn.execute("""
+                                INSERT OR REPLACE INTO system_settings (key, value, updated_at)
+                                VALUES ('database_url', '', ?)
+                            """, (datetime.now(),))
+                            conn.commit()
+                            st.success("✅ Configurado para usar SQLite. Reinicia la app para aplicar el cambio.")
+                        st.info("🔄 Para reiniciar: cierra la app y vuelve a ejecutar `streamlit run main.py`")
+                    except Exception as e:
+                        st.error(f"❌ Error guardando configuración: {e}")
+
         # ----------------------------------------------------------------------
         # TAB 6: AUDITORÍA
         # ----------------------------------------------------------------------
@@ -1497,7 +1588,7 @@ def view_admin(conn):
                         col_l2.markdown(f"**{log['action'].replace('_', ' ').title()}**")
                         col_l2.caption(f"👤 {log['user_id'] or 'Sistema'} | 🌐 {log['ip_address'] or 'N/A'}")
                         try:
-                            t = datetime.strptime(log['created_at'], '%Y-%m-%d %H:%M:%S').strftime('%d/%m/%Y %H:%M')
+                            t = (parse_dt(log['created_at']) or datetime.min).strftime('%d/%m/%Y %H:%M')
                         except Exception:
                             t = log['created_at'] or ''
                         col_l3.caption(t)
@@ -1512,6 +1603,7 @@ def view_admin(conn):
             
             from pathlib import Path
             import shutil
+            from database import USE_POSTGRES
             
             BACKUP_DIR = Path('backups')
             BACKUP_DIR.mkdir(exist_ok=True)
@@ -1589,9 +1681,10 @@ def view_admin(conn):
                 
                 if should_backup and sel_backup != "Cada inicio de sesión":
                     try:
-                        ts = now.strftime("%Y%m%d_%H%M%S")
-                        dest = BACKUP_DIR / f"learning_platform_backup_{ts}.db"
-                        shutil.copy2(DB_FILE, dest)
+                        if not USE_POSTGRES:
+                            ts = now.strftime("%Y%m%d_%H%M%S")
+                            dest = BACKUP_DIR / f"learning_platform_backup_{ts}.db"
+                            shutil.copy2(DB_FILE, dest)
                         conn.execute("""
                             INSERT OR REPLACE INTO system_settings (key, value, description, updated_at)
                             VALUES ('last_auto_backup', ?, 'Último backup automático', CURRENT_TIMESTAMP)
@@ -1606,75 +1699,76 @@ def view_admin(conn):
             # BACKUP MANUAL
             # -------------------------------------------------------------------
             st.markdown("#### 💾 Backup Manual")
-            col_b1, col_b2 = st.columns([3, 1])
-            with col_b1:
-                st.info("Crea una copia de seguridad inmediata de la base de datos.")
-            with col_b2:
-                if st.button("📥 Crear Backup Ahora", type="primary", use_container_width=True):
-                    try:
-                        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        dest = BACKUP_DIR / f"learning_platform_backup_{ts}.db"
-                        shutil.copy2(DB_FILE, dest)
-                        conn.execute("""
-                            INSERT OR REPLACE INTO system_settings (key, value, description, updated_at)
-                            VALUES ('last_auto_backup', ?, 'Último backup automático', CURRENT_TIMESTAMP)
-                        """, (datetime.now().isoformat(),))
-                        conn.commit()
-                        st.success(f"✅ Backup creado: {dest.name}")
-                    except Exception as e:
-                        st.error(f"❌ Error: {e}")
+            if USE_POSTGRES:
+                st.info("ℹ️ En modo PostgreSQL, los backups se gestionan desde el panel de Supabase o con `pg_dump`. Los backups de archivo `.db` no aplican.")
+            else:
+                col_b1, col_b2 = st.columns([3, 1])
+                with col_b1:
+                    st.info("Crea una copia de seguridad inmediata de la base de datos.")
+                with col_b2:
+                    if st.button("📥 Crear Backup Ahora", type="primary", use_container_width=True):
+                        try:
+                            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            dest = BACKUP_DIR / f"learning_platform_backup_{ts}.db"
+                            shutil.copy2(DB_FILE, dest)
+                            conn.execute("""
+                                INSERT OR REPLACE INTO system_settings (key, value, description, updated_at)
+                                VALUES ('last_auto_backup', ?, 'Último backup automático', CURRENT_TIMESTAMP)
+                            """, (datetime.now().isoformat(),))
+                            conn.commit()
+                            st.success(f"✅ Backup creado: {dest.name}")
+                        except Exception as e:
+                            st.error(f"❌ Error: {e}")
             
             st.divider()
             
             # -------------------------------------------------------------------
             # RESTAURAR BACKUP
             # -------------------------------------------------------------------
-            st.markdown("#### � Restaurar Base de Datos")
-            
-            backups = sorted(BACKUP_DIR.glob("*.db"), reverse=True)
-            
-            if not backups:
-                st.info("📭 No hay backups disponibles. Crea uno primero.")
+            st.markdown("#### 🗄️ Restaurar Base de Datos")
+
+            if USE_POSTGRES:
+                st.info("ℹ️ En modo PostgreSQL, la restauración se gestiona desde el panel de Supabase o con `pg_restore`.")
             else:
-                st.warning("⚠️ Restaurar reemplazará todos los datos actuales con los del backup seleccionado.")
-                
-                backup_names = [f.name for f in backups]
-                selected_backup = st.selectbox(
-                    "Selecciona el backup a restaurar:",
-                    backup_names,
-                    format_func=lambda x: f"📦 {x}"
-                )
-                
-                # Mostrar fecha legible del backup seleccionado
-                try:
-                    parts = selected_backup.replace('learning_platform_backup_', '').replace('.db', '')
-                    dt = datetime.strptime(parts, "%Y%m%d_%H%M%S")
-                    st.caption(f"📅 Fecha del backup: {dt.strftime('%d/%m/%Y a las %H:%M:%S')}")
-                except Exception:
-                    pass
-                
-                col_r1, col_r2 = st.columns([3, 1])
-                with col_r1:
-                    confirm_restore = st.checkbox("✅ Confirmo que quiero restaurar este backup y entiendo que se perderán los datos actuales")
-                with col_r2:
-                    if st.button("� Restaurar Ahora", type="primary", use_container_width=True,
-                                 disabled=not confirm_restore):
-                        try:
-                            # Crear backup de seguridad antes de restaurar
-                            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                            safety = BACKUP_DIR / f"pre_restore_backup_{ts}.db"
-                            shutil.copy2(DB_FILE, safety)
-                            
-                            # Copiar el backup seleccionado
-                            src = BACKUP_DIR / selected_backup
-                            shutil.copy2(src, DB_FILE)
-                            
-                            st.success(f"✅ Base de datos restaurada desde '{selected_backup}'. Se creó backup de seguridad: '{safety.name}'. Reinicia la aplicación.")
-                        except Exception as e:
-                            st.error(f"❌ Error al restaurar: {e}")
-            
+                backups = sorted(BACKUP_DIR.glob("*.db"), reverse=True)
+
+                if not backups:
+                    st.info("📭 No hay backups disponibles. Crea uno primero.")
+                else:
+                    st.warning("⚠️ Restaurar reemplazará todos los datos actuales con los del backup seleccionado.")
+
+                    backup_names = [f.name for f in backups]
+                    selected_backup = st.selectbox(
+                        "Selecciona el backup a restaurar:",
+                        backup_names,
+                        format_func=lambda x: f"📦 {x}"
+                    )
+
+                    try:
+                        parts = selected_backup.replace('learning_platform_backup_', '').replace('.db', '')
+                        dt = parse_dt(parts)
+                        st.caption(f"📅 Fecha del backup: {dt.strftime('%d/%m/%Y a las %H:%M:%S')}")
+                    except Exception:
+                        pass
+
+                    col_r1, col_r2 = st.columns([3, 1])
+                    with col_r1:
+                        confirm_restore = st.checkbox("✅ Confirmo que quiero restaurar este backup y entiendo que se perderán los datos actuales")
+                    with col_r2:
+                        if st.button("🔄 Restaurar Ahora", type="primary", use_container_width=True,
+                                     disabled=not confirm_restore):
+                            try:
+                                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                safety = BACKUP_DIR / f"pre_restore_backup_{ts}.db"
+                                shutil.copy2(DB_FILE, safety)
+                                src = BACKUP_DIR / selected_backup
+                                shutil.copy2(src, DB_FILE)
+                                st.success(f"✅ Base de datos restaurada desde '{selected_backup}'. Se creó backup de seguridad: '{safety.name}'. Reinicia la aplicación.")
+                            except Exception as e:
+                                st.error(f"❌ Error al restaurar: {e}")
+
             st.divider()
-            
+
             # -------------------------------------------------------------------
             # OPTIMIZACIÓN MANUAL
             # -------------------------------------------------------------------
@@ -1685,9 +1779,29 @@ def view_admin(conn):
             with col_o2:
                 if st.button("🔧 Optimizar DB", type="secondary", use_container_width=True):
                     try:
-                        conn.execute("VACUUM")
-                        conn.execute("ANALYZE")
-                        conn.commit()
+                        if USE_POSTGRES:
+                            # VACUUM no puede correr dentro de una transacción en PostgreSQL
+                            # Primero cerramos cualquier transacción activa con commit
+                            raw_conn = conn._conn  # psycopg2 connection subyacente
+                            try:
+                                raw_conn.commit()  # cerrar transacción activa antes de cambiar autocommit
+                            except Exception:
+                                try:
+                                    raw_conn.rollback()
+                                except Exception:
+                                    pass
+                            old_autocommit = raw_conn.autocommit
+                            raw_conn.autocommit = True
+                            try:
+                                cur = raw_conn.cursor()
+                                cur.execute("VACUUM ANALYZE")
+                                cur.close()
+                            finally:
+                                raw_conn.autocommit = old_autocommit
+                        else:
+                            conn.execute("VACUUM")
+                            conn.execute("ANALYZE")
+                            conn.commit()
                         st.success("✅ Base de datos optimizada")
                         db_manager.log_activity(
                             user_id=st.session_state.user['username'],
@@ -2011,7 +2125,7 @@ def view_admin(conn):
                         if activity['entity_type']:
                             col_a1.caption(f"📁 {activity['entity_type']}")
                         col_a2.caption(
-                            datetime.strptime(activity['created_at'], '%Y-%m-%d %H:%M:%S').strftime('%d/%m/%Y %H:%M')
+                            (parse_dt(activity['created_at']) or datetime.min).strftime('%d/%m/%Y %H:%M')
                             if activity['created_at'] else '—'
                         )
             else:
@@ -2762,9 +2876,8 @@ def render_notification_management(conn):
                     for row in rows:
                         row = dict(row)
                         try:
-                            fecha = datetime.strptime(
-                                row['created_at'], '%Y-%m-%d %H:%M:%S'
-                            ).strftime('%d/%m/%Y %H:%M')
+                            _dt = parse_dt(row['created_at'])
+                            fecha = _dt.strftime('%d/%m/%Y %H:%M') if _dt else (row['created_at'] or '')
                         except Exception:
                             fecha = row['created_at'] or ''
                         estado = "✅" if row['is_read'] else "📬"
@@ -2841,55 +2954,22 @@ def render_notification_management(conn):
 # ==============================================================================
 
 def _ensure_admin_chat_tables(conn):
-    """Crea las tablas necesarias para el chat de admins si no existen."""
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS admin_messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sender_id TEXT NOT NULL,
-            message_text TEXT NOT NULL DEFAULT '',
-            is_read_by TEXT DEFAULT '[]',
-            has_attachment INTEGER DEFAULT 0,
-            sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (sender_id) REFERENCES users(username) ON DELETE CASCADE
-        );
-        CREATE TABLE IF NOT EXISTS admin_message_files (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            message_id INTEGER NOT NULL,
-            file_name TEXT NOT NULL,
-            file_type TEXT NOT NULL,
-            file_size INTEGER NOT NULL,
-            file_content BLOB NOT NULL,
-            uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (message_id) REFERENCES admin_messages(id) ON DELETE CASCADE
-        );
-        CREATE TABLE IF NOT EXISTS admin_direct_messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sender_id TEXT NOT NULL,
-            recipient_id TEXT NOT NULL,
-            message_text TEXT NOT NULL DEFAULT '',
-            is_read INTEGER DEFAULT 0,
-            has_attachment INTEGER DEFAULT 0,
-            sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (sender_id) REFERENCES users(username) ON DELETE CASCADE,
-            FOREIGN KEY (recipient_id) REFERENCES users(username) ON DELETE CASCADE
-        );
-        CREATE TABLE IF NOT EXISTS admin_direct_files (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            message_id INTEGER NOT NULL,
-            file_name TEXT NOT NULL,
-            file_type TEXT NOT NULL,
-            file_size INTEGER NOT NULL,
-            file_content BLOB NOT NULL,
-            uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (message_id) REFERENCES admin_direct_messages(id) ON DELETE CASCADE
-        );
-    """)
-    for migration in ["ALTER TABLE admin_messages ADD COLUMN has_attachment INTEGER DEFAULT 0"]:
+    """Crea las tablas necesarias para el chat de admins si no existen.
+    Compatible con SQLite y PostgreSQL (tablas ya definidas en database.py init_db,
+    este método solo agrega migraciones de columnas opcionales)."""
+    # Las tablas se crean en database.py. Solo aplicamos la migración de has_attachment.
+    try:
+        conn.execute("SELECT has_attachment FROM admin_messages LIMIT 1")
+    except Exception:
         try:
-            conn.execute(migration)
+            conn.rollback()
+            conn.execute("ALTER TABLE admin_messages ADD COLUMN has_attachment INTEGER DEFAULT 0")
+            conn.commit()
         except Exception:
-            pass
-    conn.commit()
+            try:
+                conn.rollback()
+            except Exception:
+                pass
 
 
 def _render_admin_bubble(msg, u, files):
@@ -2901,7 +2981,7 @@ def _render_admin_bubble(msg, u, files):
     border = "1px solid rgba(59,130,246,0.25)" if is_mine else "1px solid rgba(255,255,255,0.07)"
     name   = "Tú" if is_mine else _html.escape(msg.get('sender_name', msg['sender_id']))
     try:
-        t = datetime.strptime(msg['sent_at'], '%Y-%m-%d %H:%M:%S').strftime('%d/%m/%Y %H:%M')
+        t = (parse_dt(msg['sent_at']) or datetime.min).strftime('%d/%m/%Y %H:%M')
     except Exception:
         t = str(msg['sent_at'] or "")
     safe_text = _html.escape(msg['message_text']) if msg['message_text'] else ""
@@ -2911,7 +2991,7 @@ def _render_admin_bubble(msg, u, files):
         fname = _html.escape(f['file_name'])
         fsize = f"{f['file_size']//1024} KB" if f['file_size'] > 1024 else f"{f['file_size']} B"
         if ftype.startswith('image/'):
-            b64 = base64.b64encode(f['file_content']).decode()
+            b64 = bytes_to_b64(f['file_content'])
             files_html += f'<div style="margin-top:8px;"><img src="data:{ftype};base64,{b64}" style="max-width:260px;max-height:200px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);"><div style="font-size:0.70em;color:#64748B;margin-top:2px;">{fname}</div></div>'
         else:
             icon = "📕" if 'pdf' in ftype else ("📦" if 'zip' in ftype or 'rar' in ftype else ("🎬" if 'video' in ftype else ("🎵" if 'audio' in ftype else "📄")))
@@ -2973,7 +3053,7 @@ def view_admin_chat(conn):
         st.markdown("**👥 Admins**")
         for adm in admins:
             is_me = adm['username'] == u['username']
-            av_src = ("data:image/png;base64," + base64.b64encode(adm['avatar']).decode() if adm['avatar'] else "https://cdn-icons-png.flaticon.com/512/847/847969.png")
+            av_src = ("data:image/png;base64," + bytes_to_b64(adm['avatar']) if adm['avatar'] else "https://cdn-icons-png.flaticon.com/512/847/847969.png")
             st.markdown(f"""<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:8px;border-radius:10px;background:{'rgba(59,130,246,0.1)' if is_me else 'rgba(255,255,255,0.04)'};border:1px solid {'rgba(59,130,246,0.3)' if is_me else 'rgba(255,255,255,0.07)'};">
                 <img src="{av_src}" style="width:28px;height:28px;border-radius:50%;object-fit:cover;">
                 <div style="font-size:0.78rem;color:{'#60A5FA' if is_me else '#94A3B8'};">{adm['full_name']}{' (tú)' if is_me else ''}</div></div>""", unsafe_allow_html=True)
@@ -3108,7 +3188,7 @@ def view_admin_dm(conn):
             ca, cb = st.columns([1, 4])
             with ca:
                 if adm['avatar']:
-                    b64 = base64.b64encode(adm['avatar']).decode()
+                    b64 = bytes_to_b64(adm['avatar'])
                     st.markdown(
                         f'<img src="data:image/png;base64,{b64}" '
                         f'style="width:46px;height:46px;border-radius:50%;'
@@ -3182,7 +3262,7 @@ def view_admin_dm(conn):
         tc1, tc2 = st.columns([8, 1])
         with tc1:
             if target['avatar']:
-                av_b64 = base64.b64encode(target['avatar']).decode()
+                av_b64 = bytes_to_b64(target['avatar'])
                 av_html = (f'<img src="data:image/png;base64,{av_b64}" '
                            f'style="width:38px;height:38px;border-radius:50%;'
                            f'object-fit:cover;border:2px solid rgba(59,130,246,.5)">')
@@ -3233,7 +3313,7 @@ def view_admin_dm(conn):
                 for msg in msgs:
                     is_mine = msg['sender_id'] == u['username']
                     try:
-                        dt = datetime.strptime(msg['sent_at'], '%Y-%m-%d %H:%M:%S')
+                        dt = parse_dt(msg['sent_at'])
                         msg_date = dt.strftime('%d/%m/%Y')
                         msg_time = dt.strftime('%H:%M')
                     except Exception:
@@ -3257,7 +3337,7 @@ def view_admin_dm(conn):
                                          if f['file_size'] > 1024
                                          else f"{f['file_size']} B")
                                 if ftype.startswith('image/'):
-                                    fb64 = base64.b64encode(f['file_content']).decode()
+                                    fb64 = bytes_to_b64(f['file_content'])
                                     att_html += (
                                         f'<br><img src="data:{ftype};base64,{fb64}" '
                                         f'style="max-width:200px;max-height:150px;'
@@ -3335,34 +3415,7 @@ def view_admin_teacher_chat(conn):
     import json as _json
     u = st.session_state.user
 
-    # Crear tabla si no existe
-    try:
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS admin_teacher_messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sender_id TEXT NOT NULL,
-                teacher_id TEXT NOT NULL,
-                message_text TEXT NOT NULL DEFAULT '',
-                is_read_by TEXT DEFAULT '[]',
-                has_attachment INTEGER DEFAULT 0,
-                sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (sender_id) REFERENCES users(username) ON DELETE CASCADE,
-                FOREIGN KEY (teacher_id) REFERENCES users(username) ON DELETE CASCADE
-            );
-            CREATE TABLE IF NOT EXISTS admin_teacher_files (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                message_id INTEGER NOT NULL,
-                file_name TEXT NOT NULL,
-                file_type TEXT NOT NULL,
-                file_size INTEGER NOT NULL,
-                file_content BLOB NOT NULL,
-                uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (message_id) REFERENCES admin_teacher_messages(id) ON DELETE CASCADE
-            );
-        """)
-        conn.commit()
-    except Exception:
-        pass
+    # Tablas creadas en database.py init_db — no se necesita crear aquí
 
     # CSS reutilizado del DM
     st.markdown("""<style>
@@ -3419,7 +3472,7 @@ def view_admin_teacher_chat(conn):
         for t in teachers:
             is_sel = target_id == t['username']
             if t['avatar']:
-                b64 = base64.b64encode(t['avatar']).decode()
+                b64 = bytes_to_b64(t['avatar'])
                 av_html = f'<img src="data:image/png;base64,{b64}" style="width:44px;height:44px;border-radius:50%;object-fit:cover;margin-top:4px;">'
             else:
                 av_html = f'<div style="width:44px;height:44px;border-radius:50%;background:{t["color"]};display:flex;align-items:center;justify-content:center;font-size:1.1rem;font-weight:700;color:#fff;margin-top:4px;">{t["initial"]}</div>'
@@ -3482,7 +3535,7 @@ def view_admin_teacher_chat(conn):
 
         # Topbar
         if target['avatar']:
-            av_b64 = base64.b64encode(target['avatar']).decode()
+            av_b64 = bytes_to_b64(target['avatar'])
             av_top = f'<img src="data:image/png;base64,{av_b64}" style="width:38px;height:38px;border-radius:50%;object-fit:cover;border:2px solid rgba(14,165,233,.5)">'
         else:
             av_top = f'<div style="width:38px;height:38px;border-radius:50%;background:{target["color"]};display:flex;align-items:center;justify-content:center;font-size:1rem;font-weight:700;color:#fff;">{target["initial"]}</div>'
@@ -3531,7 +3584,7 @@ def view_admin_teacher_chat(conn):
                 for msg in msgs:
                     is_mine = msg['sender_id'] == u['username']
                     try:
-                        dt = datetime.strptime(msg['sent_at'], '%Y-%m-%d %H:%M:%S')
+                        dt = parse_dt(msg['sent_at'])
                         msg_date = dt.strftime('%d/%m/%Y')
                         msg_time = dt.strftime('%H:%M')
                     except Exception:
@@ -3552,7 +3605,7 @@ def view_admin_teacher_chat(conn):
                                 fname = _hl.escape(f['file_name'])
                                 fsize = f"{f['file_size']//1024} KB" if f['file_size'] > 1024 else f"{f['file_size']} B"
                                 if ftype.startswith('image/'):
-                                    fb64 = base64.b64encode(f['file_content']).decode()
+                                    fb64 = bytes_to_b64(f['file_content'])
                                     att_html += f'<br><img src="data:{ftype};base64,{fb64}" style="max-width:200px;max-height:150px;border-radius:8px;margin-top:4px">'
                                 else:
                                     icon = '📕' if 'pdf' in ftype else ('📦' if 'zip' in ftype else ('🎬' if 'video' in ftype else '📄'))
@@ -3619,33 +3672,9 @@ def view_admin_teacher_chat(conn):
 # ==============================================================================
 
 def _ensure_admin_user_chat_tables(conn):
-    """Crea tablas para chat usuario→administración."""
-    try:
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS admin_student_messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sender_id TEXT NOT NULL,
-                student_id TEXT NOT NULL,
-                message_text TEXT NOT NULL DEFAULT '',
-                is_read_by TEXT DEFAULT '[]',
-                has_attachment INTEGER DEFAULT 0,
-                sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (sender_id) REFERENCES users(username) ON DELETE CASCADE,
-                FOREIGN KEY (student_id) REFERENCES users(username) ON DELETE CASCADE
-            );
-            CREATE TABLE IF NOT EXISTS admin_student_files (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                message_id INTEGER NOT NULL,
-                file_name TEXT NOT NULL,
-                file_type TEXT NOT NULL,
-                file_size INTEGER NOT NULL,
-                file_content BLOB NOT NULL,
-                FOREIGN KEY (message_id) REFERENCES admin_student_messages(id) ON DELETE CASCADE
-            );
-        """)
-        conn.commit()
-    except Exception:
-        pass
+    """Crea tablas para chat usuario→administración.
+    Compatible con SQLite y PostgreSQL (tablas ya definidas en database.py init_db)."""
+    pass  # Tablas admin_student_messages y admin_student_files definidas en database.py
 
 
 def _render_user_admin_chat(conn, u, table_msg, table_files, user_field, counter_key, back_page):
@@ -3654,30 +3683,7 @@ def _render_user_admin_chat(conn, u, table_msg, table_files, user_field, counter
     import json as _json
 
     _ensure_admin_user_chat_tables(conn)
-    if table_msg == 'admin_teacher_messages':
-        try:
-            conn.executescript("""
-                CREATE TABLE IF NOT EXISTS admin_teacher_messages (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    sender_id TEXT NOT NULL,
-                    teacher_id TEXT NOT NULL,
-                    message_text TEXT NOT NULL DEFAULT '',
-                    is_read_by TEXT DEFAULT '[]',
-                    has_attachment INTEGER DEFAULT 0,
-                    sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-                CREATE TABLE IF NOT EXISTS admin_teacher_files (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    message_id INTEGER NOT NULL,
-                    file_name TEXT NOT NULL,
-                    file_type TEXT NOT NULL,
-                    file_size INTEGER NOT NULL,
-                    file_content BLOB NOT NULL
-                );
-            """)
-            conn.commit()
-        except Exception:
-            pass
+    # Tablas admin_teacher_messages y admin_teacher_files creadas en database.py
 
     # CSS burbujas
     st.markdown("""<style>
@@ -3748,7 +3754,7 @@ def _render_user_admin_chat(conn, u, table_msg, table_files, user_field, counter
             for msg in msgs:
                 is_mine = msg['sender_id'] == u['username']
                 try:
-                    dt = datetime.strptime(msg['sent_at'], '%Y-%m-%d %H:%M:%S')
+                    dt = parse_dt(msg['sent_at'])
                     msg_date = dt.strftime('%d/%m/%Y')
                     msg_time = dt.strftime('%H:%M')
                 except Exception:
@@ -3777,7 +3783,7 @@ def _render_user_admin_chat(conn, u, table_msg, table_files, user_field, counter
                             fname = _hl.escape(f['file_name'])
                             fsize = f"{f['file_size']//1024} KB" if f['file_size'] > 1024 else f"{f['file_size']} B"
                             if ftype.startswith('image/'):
-                                fb64 = base64.b64encode(f['file_content']).decode()
+                                fb64 = bytes_to_b64(f['file_content'])
                                 att_html += f'<br><img src="data:{ftype};base64,{fb64}" style="max-width:200px;max-height:150px;border-radius:8px;margin-top:4px">'
                             else:
                                 icon = '📕' if 'pdf' in ftype else ('📦' if 'zip' in ftype else ('🎬' if 'video' in ftype else '📄'))
@@ -3918,7 +3924,7 @@ def _render_admin_reply_chat(conn, u, table_msg, table_files, user_field, user_r
         for usr in all_users:
             is_sel = target_id == usr['username']
             if usr['avatar']:
-                b64 = base64.b64encode(usr['avatar']).decode()
+                b64 = bytes_to_b64(usr['avatar'])
                 av_html = f'<img src="data:image/png;base64,{b64}" style="width:44px;height:44px;border-radius:50%;object-fit:cover;margin-top:4px;">'
             else:
                 av_html = f'<div style="width:44px;height:44px;border-radius:50%;background:{usr["color"]};display:flex;align-items:center;justify-content:center;font-size:1.1rem;font-weight:700;color:#fff;margin-top:4px;">{usr["initial"]}</div>'
@@ -3988,7 +3994,7 @@ def _render_admin_reply_chat(conn, u, table_msg, table_files, user_field, user_r
 
         # Topbar
         if target['avatar']:
-            av_b64 = base64.b64encode(target['avatar']).decode()
+            av_b64 = bytes_to_b64(target['avatar'])
             av_top = f'<img src="data:image/png;base64,{av_b64}" style="width:38px;height:38px;border-radius:50%;object-fit:cover;">'
         else:
             av_top = f'<div style="width:38px;height:38px;border-radius:50%;background:{target["color"]};display:flex;align-items:center;justify-content:center;font-size:1rem;font-weight:700;color:#fff;">{target["initial"]}</div>'
@@ -4061,7 +4067,7 @@ def _render_admin_reply_chat(conn, u, table_msg, table_files, user_field, user_r
                 for msg in msgs:
                     is_mine = msg['sender_id'] == u['username']
                     try:
-                        dt = datetime.strptime(msg['sent_at'], '%Y-%m-%d %H:%M:%S')
+                        dt = parse_dt(msg['sent_at'])
                         msg_date = dt.strftime('%d/%m/%Y')
                         msg_time = dt.strftime('%H:%M')
                     except Exception:
@@ -4085,7 +4091,7 @@ def _render_admin_reply_chat(conn, u, table_msg, table_files, user_field, user_r
                                 fname = _hl.escape(f['file_name'])
                                 fsize = f"{f['file_size']//1024} KB" if f['file_size'] > 1024 else f"{f['file_size']} B"
                                 if ftype.startswith('image/'):
-                                    fb64 = base64.b64encode(f['file_content']).decode()
+                                    fb64 = bytes_to_b64(f['file_content'])
                                     att_html += f'<br><img src="data:{ftype};base64,{fb64}" style="max-width:200px;max-height:150px;border-radius:8px;margin-top:4px">'
                                 else:
                                     icon = '📕' if 'pdf' in ftype else ('📦' if 'zip' in ftype else '📄')
