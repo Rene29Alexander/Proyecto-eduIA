@@ -2,6 +2,11 @@
 
 > Plataforma web educativa que integra IA para automatizar la generación de contenido, evaluaciones y retroalimentación personalizada para estudiantes, docentes y administradores.
 
+**🌐 URL pública:** [https://eduiaiugb.streamlit.app/](https://eduiaiugb.streamlit.app/)
+**📦 Repositorio:** [github.com/Rene29Alexander/Proyecto-eduIA](https://github.com/Rene29Alexander/Proyecto-eduIA)
+**🏷️ Release:** `v1.0.0` — rama `migracion-base-de-datos`
+**🔁 CI/CD:** ![CI](https://github.com/Rene29Alexander/Proyecto-eduIA/actions/workflows/ci.yml/badge.svg)
+
 ---
 
 ##  Integrantes del grupo
@@ -143,41 +148,27 @@ GEMINI_API_KEY_5 = "tu_api_key_alternativa_5"
 ## 10. Limitaciones conocidas del prototipo
 
 - Depende de internet y disponibilidad de la API de Gemini
+- La librería `google-generativeai` está deprecada — requiere migración a `google.genai`
 - La generación de exámenes no siempre produce el número exacto de preguntas solicitadas
-- Sin versión móvil optimizada (diseñada para escritorio)
+- Sin autenticación por tokens JWT (solo sesión en memoria de Streamlit)
 - En modo SQLite (desarrollo local), no soporta múltiples instancias simultáneas — usar PostgreSQL para producción
-- Sin sistema de autenticación por roles con tokens seguros (solo sesión en memoria)
+- Streamlit Cloud duerme la app tras 7 días sin tráfico (~30s para despertar)
 
 ---
 
 ## 11. Pruebas automatizadas (Semana 3)
 
-### Instalar dependencias de prueba
+### Ejecutar todas las pruebas unitarias
 
 ```bash
-pip install -r requirements.txt
-```
+# 111 tests unitarios — sin servidor, sin API Key real
+python -m pytest tests/test_api_unit.py tests/test_analizador_sintaxis.py tests/test_analizador_logica.py tests/test_engagement_managers.py -v
 
-### Ejecutar todas las pruebas
-
-```bash
-# Todas las pruebas (sin servidor, sin API Key real)
-python -m pytest tests/test_api_unit.py tests/test_analizador_sintaxis.py tests/test_analizador_logica.py -v
-
-# Solo pruebas de la API
-python -m pytest tests/test_api_unit.py -v
-
-# Solo pruebas del evaluador de código
-python -m pytest tests/test_analizador_sintaxis.py tests/test_analizador_logica.py -v
-
-# Pruebas de los managers de engagement (Semana 5 — 38 tests)
-python -m pytest tests/test_engagement_managers.py -v
-
-# Todas las pruebas juntas
-python -m pytest tests/ -v
+# Pruebas de base de datos (SQLite local)
+python scripts/test_database.py
 
 # Resumen compacto
-python -m pytest tests/ -q
+python -m pytest tests/test_api_unit.py tests/test_analizador_sintaxis.py tests/test_analizador_logica.py tests/test_engagement_managers.py -q
 ```
 
 ### Pruebas de integración (requiere servidor corriendo)
@@ -192,18 +183,28 @@ python tests/test_api_evidencia.py
 
 ### Descripción de los archivos de prueba
 
-| Archivo | Tipo | Qué prueba | Requiere servidor |
+| Archivo | Tipo | Tests | Requiere servidor |
 |---|---|---|---|
-| `test_api_unit.py` | Unitaria | Validaciones y endpoints de la API (29 tests) | ❌ No |
-| `test_analizador_sintaxis.py` | Unitaria | Detección de errores de sintaxis por lenguaje | ❌ No |
-| `test_analizador_logica.py` | Unitaria | Detección de errores de lógica | ❌ No |
-| `test_api_evidencia.py` | Integración | Pruebas end-to-end con HTTP real | ✅ Sí |
-| `test_evaluation_properties.py` | Propiedad | Property-based testing del evaluador | ❌ No |
-| `test_engagement_managers.py` | Unitaria | 38 tests para PointsManager, StreakManager, ChallengeManager, LeaderboardManager | ❌ No |
+| `test_api_unit.py` | Unitaria | 29 | ❌ No |
+| `test_analizador_sintaxis.py` | Unitaria | 26 | ❌ No |
+| `test_analizador_logica.py` | Unitaria | 18 | ❌ No |
+| `test_engagement_managers.py` | Unitaria | 38 | ❌ No |
+| `test_api_evidencia.py` | Integración | — | ✅ Sí |
+| `test_evaluation_properties.py` | Propiedad | — | ❌ No |
+| `scripts/test_database.py` | BD | ~30 checks | ❌ No |
+| **Total unitarios** | | **111 ✅** | |
 
-### Pipeline CI/CD
+### Pipeline CI/CD — 3 jobs
 
-El proyecto incluye `.github/workflows/ci.yml` que ejecuta automáticamente las pruebas en cada push a `main`.
+El proyecto incluye `.github/workflows/ci.yml` con tres jobs que se ejecutan en cada push:
+
+| Job | Qué hace |
+|---|---|
+| `unit-tests` | 111 pruebas unitarias (API, analizadores, engagement) |
+| `db-tests-sqlite` | Pruebas de BD con SQLite local |
+| `db-tests-postgres` | Pruebas de BD con PostgreSQL real (servicio en el runner) |
+
+Estado: [Ver pipeline en GitHub Actions](https://github.com/Rene29Alexander/Proyecto-eduIA/actions)
 
 Ver errores detectados y correcciones en [`docs/registro-errores.md`](docs/registro-errores.md)
 
@@ -526,7 +527,7 @@ Ya incluido en `requirements.txt`.
 | Semana 3 | ✅ Agregar pruebas automatizadas y pipeline CI/CD básico |
 | Semana 4 | ✅ Contenerizar con Docker y preparar despliegue en la nube |
 | Semana 5 | ✅ Observabilidad, instrumentación, pruebas de carga y escalabilidad |
-| Semana 6 | 🔄 Migración de BD a PostgreSQL/Supabase, seguridad, documentación final y defensa técnica |
+| Semana 6 | ✅ Migración BD a PostgreSQL/Supabase, diseño responsive móvil, tests BD en CI, release v1.0.0 y defensa técnica |
 
 ---
 
@@ -585,9 +586,14 @@ Grupo-2-proyecto/
 │   ├── riesgos-tecnicos.md
 │   ├── plan-mejora.md
 │   ├── api.md
+│   ├── infra-semana4.md
 │   ├── reporte_estres_20u.html    # Reporte Locust 20 usuarios
 │   ├── reporte_estres_200u.html   # Reporte Locust 200 usuarios
-│   └── Semana5-Modulo4.pdf        # Entregable Semana 5
+│   ├── reporte_estres_20u_stats.csv
+│   ├── reporte_estres_200u_stats.csv
+│   ├── Semana4_Despliegue_Infraestructura_EduIA.pdf
+│   ├── Semana5-Modulo4.pdf        # Entregable Semana 5
+│   └── link proyecto grupo 2.txt
 ├── scripts/                   # Scripts de utilidad y mantenimiento
 │   ├── migrate_to_postgres.py # Migración completa SQLite → PostgreSQL
 │   ├── add_test_coins.py
@@ -609,6 +615,50 @@ Grupo-2-proyecto/
 └── .streamlit/
     └── secrets.toml           # API keys y DATABASE_URL (NO subir al repo)
 ```
+
+---
+
+## 16. Release v1.0.0 — Semana 6
+
+| Elemento | Valor |
+|---|---|
+| **URL pública** | [https://eduiaiugb.streamlit.app/](https://eduiaiugb.streamlit.app/) |
+| **Tag** | `v1.0.0` |
+| **Rama** | `migracion-base-de-datos` |
+| **Commit demostrado** | `4ec811d` |
+
+### Rollback
+
+Si la versión desplegada presenta problemas críticos:
+
+```bash
+# 1. Identificar el commit estable anterior
+git log --oneline -5
+
+# 2. Crear rama de rollback
+git checkout -b rollback-estable <commit-hash>
+git push -u origin rollback-estable
+
+# 3. En Streamlit Cloud: cambiar la rama del deploy a rollback-estable
+```
+
+### Pruebas de humo post-deploy
+
+```bash
+# Verificar que la app está viva
+curl https://eduiaiugb.streamlit.app/
+
+# Verificar que la API responde (si está levantada localmente)
+curl http://localhost:8000/health
+curl http://localhost:8000/metadata
+```
+
+### Seguridad
+
+- Secretos (`GEMINI_API_KEY`, `DATABASE_URL`) almacenados en Streamlit Cloud Secrets — nunca en el repositorio
+- Rate limiting: 60 req/min por IP (endpoints IA), 300 req/min (sistema)
+- Validación estricta de entradas con Pydantic — sin stacktraces expuestos al cliente
+- Diseño responsive implementado — compatible con móvil y tablet
 
 ---
 
