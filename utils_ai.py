@@ -5685,11 +5685,33 @@ def extract_text_from_pdf(file_bytes):
     except: return "Error PDF"
 
 def display_pdf(file_bytes):
-    if not file_bytes: return
+    """
+    Muestra un PDF en la interfaz de Streamlit.
+    Usa <embed> dentro de st.components.v1.html para evitar que
+    navegadores como Brave bloqueen el iframe con data: URL.
+    """
+    if not file_bytes:
+        return
     try:
+        import streamlit.components.v1 as components
         b64 = base64.b64encode(file_bytes).decode('utf-8')
-        st.markdown(f'<iframe src="data:application/pdf;base64,{b64}" width="100%" height="600" type="application/pdf"></iframe>', unsafe_allow_html=True)
-    except: pass
+        pdf_html = f"""
+        <style>
+            body {{ margin: 0; padding: 0; background: #1e1e1e; }}
+            embed {{ border: none; border-radius: 4px; }}
+        </style>
+        <embed
+            src="data:application/pdf;base64,{b64}"
+            type="application/pdf"
+            width="100%"
+            height="590px"
+        />
+        """
+        components.html(pdf_html, height=600, scrolling=False)
+    except Exception:
+        # Fallback: botón de descarga si el visor falla
+        import io
+        st.info("⚠️ No se pudo mostrar el PDF en el navegador. Usa el botón de descarga.")
 
 # Instancia global
 ai_manager = AIManager()
