@@ -180,8 +180,23 @@ def update_activity():
 def perform_logout():
     if st.session_state.user:
         db_manager.log_activity(st.session_state.user['username'], 'logout')
-    
-    # Reset completo
+
+    # Eliminar token persistente
+    token = st.session_state.get('_session_token', '')
+    if token:
+        _delete_session_token(token)
+        # Limpiar localStorage en el navegador
+        import streamlit.components.v1 as components
+        components.html(f"""
+        <script>
+            localStorage.removeItem('{SESSION_TOKEN_KEY}');
+            var url = new URL(window.location.href);
+            url.searchParams.delete('_st');
+            window.history.replaceState({{}}, '', url.toString());
+        </script>
+        """, height=0)
+
+    # Reset completo del session_state
     st.session_state.logged_in = False
     st.session_state.user = None
     st.session_state.current_page = 'dashboard'
@@ -245,6 +260,12 @@ def process_login_logic(username, password):
         st.session_state.user = dict(u)
         st.session_state.theme = u['theme']
         st.session_state.last_activity = datetime.now()
+
+        # Generar token de sesión persistente
+        token = _generate_session_token()
+        _save_session_token(username, token)
+        st.session_state['_session_token'] = token
+        _inject_session_js(token)
         
         # Actualizar DB
         try:
@@ -303,8 +324,153 @@ def process_login_logic(username, password):
         db_manager.log_activity(username, 'login_failed_pwd', ip=ip)
         return False
 
-@st.cache_data(ttl=30, show_spinner=False)
-def get_logo_config():
+import secrets
+from datetime import timedelta
+
+# ── Sesión persistente — token en localStorage ────────────────────────────────
+
+SESSION_TOKEN_KEY   = "eduia_session_token"
+SESSION_TTL_DAYS    = 30   # el token dura 30 días sin actividad
+
+
+def _generate_session_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _save_session_token(username: str, token: str):
+    """Guarda el token en system_settings con fecha de expiración."""
+    try:
+        expiry = (datetime.now() + timedelta(days=SESSION_TTL_DAYS)).isoformat()
+        value  = f"{username}|{expiry}"
+        conn.execute("""
+            INSERT OR REPLACE INTO system_settings (key, value, updated_at)
+            VALUES (?, ?, ?)
+        """, (f"sess_{token[:16]}", value, datetime.now()))
+        conn.commit()
+    except Exception as e:
+        print(f"[session] Error guardando token: {e}")
+
+
+def _validate_session_token(token: str):
+    """
+    Retorna el usuario si el token es válido y no expiró.
+    Retorna None si es inválido o expiró.
+    """
+    try:
+        row = conn.execute(
+            "SELECT value FROM system_settings WHERE key = ?",
+            (f"sess_{token[:16]}",)
+        ).fetchone()
+        if not row or not row[0]:
+            return None
+        parts = row[0].split("|", 1)
+        if len(parts) != 2:
+            return None
+        username, expiry_str = parts
+        expiry = datetime.fromisoformat(expiry_str)
+        if datetime.now() > expiry:
+            _delete_session_token(token)
+            return None
+        # Renovar TTL en cada uso
+        _save_session_token(username, token)
+        return username
+    except Exception as e:
+        print(f"[session] Error validando token: {e}")
+        return None
+
+
+def _delete_session_token(token: str):
+    """Elimina el token de la BD (logout)."""
+    try:
+        conn.execute(
+            "DELETE FROM system_settings WHERE key = ?",
+            (f"sess_{token[:16]}",)
+        )
+        conn.commit()
+    except Exception:
+        pass
+
+
+def _inject_session_js(token: str):
+    """Inyecta JS que guarda el token en localStorage."""
+    import streamlit.components.v1 as components
+    components.html(f"""
+    <script>
+        localStorage.setItem('{SESSION_TOKEN_KEY}', '{token}');
+    </script>
+    """, height=0)
+
+
+def _read_session_token_from_query() -> str:
+    """
+    Lee el token desde st.query_params.
+    El JS del login screen lo pone en la URL como ?_st=TOKEN al cargar.
+    """
+    return st.query_params.get("_st", "")
+
+
+def _inject_session_reader():
+    """
+    Inyecta JS que lee el token de localStorage y lo pone en la URL
+    para que Python pueda leerlo via st.query_params.
+    Solo se ejecuta una vez (cuando no hay _st en la URL).
+    """
+    import streamlit.components.v1 as components
+    components.html(f"""
+    <script>
+    (function() {{
+        var token = localStorage.getItem('{SESSION_TOKEN_KEY}');
+        if (token && token.length > 10) {{
+            var url = new URL(window.location.href);
+            if (!url.searchParams.has('_st')) {{
+                url.searchParams.set('_st', token);
+                window.location.replace(url.toString());
+            }}
+        }}
+    }})();
+    </script>
+    """, height=0)
+
+
+def try_restore_session():
+    """
+    Intenta restaurar la sesión desde el token guardado en localStorage.
+    Retorna True si la sesión fue restaurada, False si hay que mostrar login.
+    """
+    if st.session_state.get('logged_in'):
+        return True
+
+    token = _read_session_token_from_query()
+    if not token:
+        return False
+
+    username = _validate_session_token(token)
+    if not username:
+        # Token inválido — limpiar query param
+        st.query_params.pop("_st", None)
+        return False
+
+    # Token válido — cargar usuario
+    try:
+        u = conn.execute(
+            "SELECT * FROM users WHERE username=? AND is_active=1", (username,)
+        ).fetchone()
+        if not u:
+            _delete_session_token(token)
+            st.query_params.pop("_st", None)
+            return False
+
+        st.session_state.logged_in  = True
+        st.session_state.user       = dict(u)
+        st.session_state.theme      = u['theme']
+        st.session_state.last_activity = datetime.now()
+        st.session_state['_session_token'] = token
+        return True
+    except Exception as e:
+        print(f"[session] Error restaurando sesión: {e}")
+        return False
+
+
     """Obtiene la configuración del logo desde la base de datos (cacheado 30 seg)"""
     try:
         logo_data = db_manager.get_connection().execute(
@@ -1446,10 +1612,20 @@ def render_sidebar():
 # ==========================================
 
 def main():
+    # 0. Intentar restaurar sesión desde localStorage (token persistente)
+    if not st.session_state.get('logged_in'):
+        restored = try_restore_session()
+        if not restored and not st.query_params.get("_st"):
+            # No hay token en URL — inyectar lector de localStorage
+            # para que en el próximo rerun lea el token si existe
+            if not st.session_state.get('_session_reader_injected'):
+                st.session_state['_session_reader_injected'] = True
+                _inject_session_reader()
+
     # 1. Login Check
     check_session_timeout()
     update_activity()
-    
+
     if not st.session_state.logged_in:
         render_login_screen()
         return
