@@ -20,7 +20,7 @@
 | **Commit** | `a8be18f` |
 | **Pipeline CI/CD** | [![CI](https://github.com/Rene29Alexander/Proyecto-eduIA/actions/workflows/ci.yml/badge.svg)](https://github.com/Rene29Alexander/Proyecto-eduIA/actions) |
 | **Informe final** | [docs/final/informe-final.md](docs/final/informe-final.md) |
-| **Credenciales demo** | Usuario: `admin` / Contraseña: `admin123` |
+| **Credenciales demo** | Compartidas por mecanismo seguro (no expuestas en repositorio) |
 
 ---
 
