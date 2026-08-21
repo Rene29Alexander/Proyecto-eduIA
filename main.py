@@ -471,6 +471,8 @@ def try_restore_session():
         return False
 
 
+@st.cache_data(ttl=30, show_spinner=False)
+def get_logo_config():
     """Obtiene la configuración del logo desde la base de datos (cacheado 30 seg)"""
     try:
         logo_data = db_manager.get_connection().execute(
