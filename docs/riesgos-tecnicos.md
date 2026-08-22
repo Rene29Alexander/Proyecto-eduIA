@@ -1,6 +1,7 @@
 #  Riesgos Técnicos y Deuda Técnica — EduIA
 
-> Identificación honesta de riesgos y problemas conocidos del proyecto.
+> **Documento histórico — Identificación de riesgos al inicio del Módulo 4 (Semana 1)**
+> Varios de estos riesgos fueron mitigados durante las sesiones 2-6. Ver informe-final.md para el estado actualizado.
 
 ---
 

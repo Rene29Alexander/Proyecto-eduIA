@@ -18,13 +18,13 @@
 
 ## Credenciales de demostración
 
-| Rol | Usuario | Contraseña |
-|---|---|---|
-| Administrador | `admin` | `admin123` |
-| Docente | _(crear desde panel admin antes de la demo)_ | _(definir antes)_ |
-| Estudiante | _(crear desde panel admin antes de la demo)_ | _(definir antes)_ |
+| Rol | Detalle |
+|---|---|
+| Administrador | Compartidas por canal seguro (WhatsApp del grupo) antes de la demo |
+| Docente | Crear desde panel admin antes de la demo |
+| Estudiante | Crear desde panel admin antes de la demo |
 
-> ⚠️ Compartir credenciales solo por canal seguro (WhatsApp del grupo), nunca en el repositorio.
+> ⚠️ Las credenciales nunca se publican en el repositorio. Compartir solo por canal privado del equipo.
 
 ---
 
