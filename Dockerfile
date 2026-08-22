@@ -31,11 +31,14 @@ COPY api.py .
 COPY config.py .
 COPY database.py .
 COPY utils_ai.py .
+COPY utils_ai_core.py .
+COPY agent_monitor.py .
 COPY models/ ./models/
 COPY evaluacion/ ./evaluacion/
 
-# Crear directorio para la base de datos SQLite
-RUN mkdir -p /app/data
+# Crear directorios para datos, logs y caché
+RUN mkdir -p /app/data /app/logs /app/.cache
+
 
 # Puerto expuesto
 EXPOSE 8000

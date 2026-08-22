@@ -154,7 +154,7 @@ try:
     if api_key:
         configure_ai(api_key)
         st.session_state.ai_available = True
-except:
+except Exception:
     st.session_state.ai_available = False
 
 inject_custom_css()

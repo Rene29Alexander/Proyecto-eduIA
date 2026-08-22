@@ -2491,7 +2491,7 @@ Responde SOLO con JSON:
                 # Mostrar cursos regulares
                 for course in regular_courses:
                     with cols[course_index % 3]:
-                        render_regular_course_card(course, course_index)
+                        render_regular_course_card(conn, model, u, course, course_index)
                     course_index += 1
                 
                 # Mostrar cursos IA
@@ -3457,7 +3457,7 @@ def render_ai_course_card(conn, ai_course, index, user):
             st.rerun()
 
 
-def render_regular_course_card(course, index):
+def render_regular_course_card(conn, model, u, course, index):
     """Renderiza tarjeta de curso regular"""
     # Descripción truncada
     desc = course.get('description', 'Sin descripción')
@@ -3808,7 +3808,7 @@ def render_regular_course_card(course, index):
             import hashlib
             
             # Crear semilla única basada en exam_id + student_id
-            seed_string = f"{es['id']}_{user['username']}"
+            seed_string = f"{es['id']}_{u['username']}"
             seed_value = int(hashlib.md5(seed_string.encode()).hexdigest(), 16) % (10 ** 8)
             
             # Aleatorizar preguntas con la semilla
