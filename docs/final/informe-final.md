@@ -217,8 +217,6 @@ La latencia de Google Gemini API (entre 2-15 segundos por llamada) es el factor 
 
 ## Siguientes pasos
 
-- Completar migración SQLite → PostgreSQL/Supabase
-- Migrar `google-generativeai` → `google.genai`
 - Implementar autenticación JWT en la API
-- Agregar rate limiting con slowapi
 - Configurar HTTPS con reverse proxy (Nginx)
+- Evaluar migración de rate limiting propio a slowapi para mayor control
