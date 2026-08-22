@@ -6,7 +6,7 @@
 **Integrantes:** Jonathan Roberto Acosta Lopez · Rene Alexander Araujo Soto · Mario Alexander Hernández Quevedo
 **URL pública:** https://eduiaiugb.streamlit.app/
 **Repositorio:** https://github.com/Rene29Alexander/Proyecto-eduIA
-**Versión:** 1.0.0 | **Commit:** 8a05d00 | **Fecha:** Agosto 2026
+**Versión:** 1.0.0 | **Commit:** 7ac7349 | **Fecha:** Agosto 2026
 
 ---
 

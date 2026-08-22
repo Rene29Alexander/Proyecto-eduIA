@@ -48,7 +48,7 @@
 | Cuota de Gemini agotada | Revisar panel de Google AI Studio antes. Limitar demos de prueba | La app muestra mensaje de error controlado — demostrarlo como falla gestionada |
 | URL no carga | Probar desde ventana privada y otra red 24h antes | Usar respaldo local con Docker si el docente lo autoriza |
 | Sesión vencida | Validar cuenta y permisos 15 min antes | Reingreso rápido con credenciales preparadas |
-| Error de CORS o migración de BD | Probar producción después del último release | Rollback a commit `8a05d00` en rama main |
+| Error de CORS o migración de BD | Probar producción después del último release | Rollback a commit `7ac7349` en rama `migracion-base-de-datos` |
 | Red o audiovisual falla | Probar red, audio y pantalla antes del turno | Segundo dispositivo con la URL abierta |
 | API de Gemini lenta | Timeout configurado en utils_ai_core.py con reintentos | Mostrar mensaje controlado como evidencia de manejo de errores |
 
