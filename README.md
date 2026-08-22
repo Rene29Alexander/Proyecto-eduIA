@@ -17,7 +17,7 @@
 | **Repositorio** | https://github.com/Rene29Alexander/Proyecto-eduIA |
 | **Versión** | v1.0.0 |
 | **Release** | [v1.0.0](https://github.com/Rene29Alexander/Proyecto-eduIA/releases/tag/v1.0.0) |
-| **Commit** | `a8be18f` |
+| **Commit** | `7ac7349` |
 | **Pipeline CI/CD** | [![CI](https://github.com/Rene29Alexander/Proyecto-eduIA/actions/workflows/ci.yml/badge.svg)](https://github.com/Rene29Alexander/Proyecto-eduIA/actions) |
 | **Informe final** | [docs/final/informe-final.md](docs/final/informe-final.md) |
 | **Credenciales demo** | Compartidas por mecanismo seguro (no expuestas en repositorio) |
@@ -773,8 +773,8 @@ curl http://localhost:8000/metadata
 
 ## Credenciales de prueba
 
-| Rol | Usuario | Contraseña |
-|---|---|---|
-| Administrador | `admin` | `admin123` |
-| Docente | _(crear desde panel admin)_ | _(la que se asigne)_ |
-| Estudiante | _(crear desde panel admin)_ | _(la que se asigne)_ |
+| Rol | Detalle |
+|---|---|
+| Administrador | Compartidas por canal seguro antes de la demo |
+| Docente | Crear desde panel admin |
+| Estudiante | Crear desde panel admin |

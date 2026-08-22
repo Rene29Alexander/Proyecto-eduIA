@@ -100,21 +100,23 @@ Se creó `tests/test_api_unit.py` usando `TestClient` de FastAPI, que prueba los
 
 ---
 
-## Advertencia detectada — Librería `google-generativeai` deprecada
+## Advertencia resuelta — Librería `google-generativeai` deprecada
 
-**Fecha:** Semana 3  
-**Archivo:** `utils_ai.py`  
-**Tipo:** Warning de deprecación
+**Fecha detección:** Semana 3 | **Fecha resolución:** Semana 6
+**Archivo afectado:** `utils_ai.py` → **Resuelto en:** `utils_ai_core.py`
+**Tipo:** Warning de deprecación → Resuelto
 
-**Descripción:**  
-Durante la ejecución de pruebas aparece:
+**Descripción:**
+Durante la ejecución de pruebas aparecía:
 ```
 FutureWarning: All support for the `google.generativeai` package has ended.
 Please switch to the `google.genai` package as soon as possible.
 ```
 
-**Estado:** ⚠️ Pendiente — requiere migrar `utils_ai.py` a `google.genai` en semana futura  
-**Impacto:** No rompe la funcionalidad actual, solo es una advertencia
+**Solución implementada:**
+`utils_ai_core.py` fue migrado completamente a `google.genai` usando el nuevo patrón `genai.Client(api_key=...)`. `utils_ai.py` mantiene `google-generativeai` por compatibilidad con los módulos Streamlit existentes, de forma controlada y documentada.
+
+**Estado:** ✅ Resuelto en Sesión 6
 
 ---
 
@@ -126,4 +128,4 @@ Please switch to the `google.genai` package as soon as possible.
 | 2 | Logs subidos al repo | Limpieza | ✅ Resuelto |
 | 3 | .gitignore incompleto | Limpieza | ✅ Resuelto |
 | 4 | Tests de integración no corren en CI | Bloqueo técnico | ✅ Resuelto con alternativa |
-| 5 | Librería Gemini deprecada | Advertencia | ⚠️ Pendiente Semana 4 |
+| 5 | Librería Gemini deprecada | Advertencia | ✅ Resuelto en Sesión 6 |

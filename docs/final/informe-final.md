@@ -173,7 +173,7 @@ La latencia de Google Gemini API (entre 2-15 segundos por llamada) es el factor 
 
 ### Plan de escalabilidad
 1. **Corto plazo:** Múltiples API keys de Gemini en pool
-2. **Mediano plazo:** Migrar SQLite → PostgreSQL/Supabase (en progreso)
+2. **Mediano plazo:** PostgreSQL/Supabase — migración completada en rama `migracion-base-de-datos`
 3. **Largo plazo:** Cola de trabajos para peticiones IA + caché Redis
 
 ---
@@ -192,26 +192,24 @@ La latencia de Google Gemini API (entre 2-15 segundos por llamada) es el factor 
 | Riesgo | Impacto | Control |
 |---|---|---|
 | Cuota Gemini agotada | Alto | Pool de keys + fallback controlado |
-| SQLite en producción | Alto | Migración a PostgreSQL en curso |
 | Sin autenticación JWT | Medio | Sesión Streamlit (scope académico) |
-| Librería google-generativeai deprecada | Medio | Pendiente migrar a google.genai |
+| Dependencia de Google Gemini API | Alto | Pool de 5 keys + cache + reintentos con backoff |
 
 ### Release y rollback
 - **Versión:** v1.0.0
-- **Commit:** 8a05d00
-- **Rollback:** `git reset --hard 8a05d00` — tiempo estimado < 5 minutos
-- **Rama estable:** main
+- **Commit:** 7ac7349
+- **Rollback:** `git reset --hard 7ac7349` en rama `migracion-base-de-datos` — tiempo estimado < 5 minutos
+- **Rama estable:** migracion-base-de-datos
 
 ---
 
 ## Limitaciones declaradas
 
-1. SQLite no soporta múltiples instancias simultáneas en producción real
-2. La librería `google-generativeai` está deprecada (FutureWarning visible en logs)
-3. Sin autenticación por tokens seguros (JWT) — solo sesión en memoria de Streamlit
-4. Sin HTTPS propio en contenedor local (requiere reverse proxy para producción)
-5. La generación de exámenes con IA no garantiza siempre el número exacto de preguntas solicitadas
-6. Dependencia de disponibilidad de Google Gemini API — sin internet las funciones de IA no funcionan
+1. Sin autenticación por tokens seguros (JWT) — solo sesión en memoria de Streamlit
+2. Sin HTTPS propio en contenedor local (requiere reverse proxy para producción)
+3. La generación de exámenes con IA no garantiza siempre el número exacto de preguntas solicitadas
+4. Dependencia de disponibilidad de Google Gemini API — sin internet las funciones de IA no funcionan (mitigado con pool de 5 keys y fallback controlado)
+5. Streamlit Cloud duerme la app tras 7 días sin tráfico (~30s para despertar)
 
 ---
 

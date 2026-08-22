@@ -1,6 +1,7 @@
 #  Arquitectura Actual — EduIA
 
-> Estado real del sistema al inicio del Módulo 4 (Semana 1)
+> **Documento histórico — Estado del sistema al inicio del Módulo 4 (Semana 1)**
+> Para ver la arquitectura final desplegada, consultar el README o el informe-final.md
 
 ---
 
